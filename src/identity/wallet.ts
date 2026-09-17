@@ -90,16 +90,19 @@ export async function getWallet(chainType?: ChainType): Promise<{
     );
     const resolvedChainType = walletData.chainType || "evm";
 
-    if (resolvedChainType === "solana" && walletData.secretKey) {
-      const secretKey = bs58.decode(walletData.secretKey);
-      const solanaIdentity = new SolanaChainIdentity(secretKey);
-      const account = createSolanaStubAccount(solanaIdentity.address);
-      return { account, chainIdentity: solanaIdentity, chainType: "solana", isNew: false };
-    }
+    // Only reuse existing wallet if chainType matches or was not specified
+    if (!chainType || chainType === resolvedChainType) {
+      if (resolvedChainType === "solana" && walletData.secretKey) {
+        const secretKey = bs58.decode(walletData.secretKey);
+        const solanaIdentity = new SolanaChainIdentity(secretKey);
+        const account = createSolanaStubAccount(solanaIdentity.address);
+        return { account, chainIdentity: solanaIdentity, chainType: "solana", isNew: false };
+      }
 
-    // EVM path (default)
-    const account = privateKeyToAccount(walletData.privateKey!);
-    return { account, chainIdentity: new EvmChainIdentity(account), chainType: "evm", isNew: false };
+      // EVM path (default)
+      const account = privateKeyToAccount(walletData.privateKey!);
+      return { account, chainIdentity: new EvmChainIdentity(account), chainType: "evm", isNew: false };
+    }
   }
 
   // Create new wallet
