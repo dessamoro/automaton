@@ -69,6 +69,10 @@ export class X402ServiceServer {
   async start(): Promise<void> {
     return new Promise((resolve) => {
       this.server = http.createServer((req, res) => this.handleRequest(req, res));
+      this.server.on("error", (err: any) => {
+        logger.warn(`x402 Service Server error: ${err.message}`);
+        resolve();
+      });
       this.server.listen(this.config.port, () => {
         logger.info(`x402 Service Server running on port ${this.config.port}`);
         resolve();
