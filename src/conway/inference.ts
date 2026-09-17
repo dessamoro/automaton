@@ -27,12 +27,13 @@ interface InferenceClientOptions {
   openaiApiKey?: string;
   anthropicApiKey?: string;
   groqApiKey?: string;
+  geminiApiKey?: string;
   ollamaBaseUrl?: string;
   /** Optional registry lookup — if provided, used before name heuristics */
   getModelProvider?: (modelId: string) => string | undefined;
 }
 
-type InferenceBackend = "conway" | "openai" | "anthropic" | "ollama" | "groq";
+type InferenceBackend = "conway" | "openai" | "anthropic" | "ollama" | "groq" | "gemini";
 
 function isLoopbackHttpUrl(url: string | undefined): boolean {
   if (!url) return false;
@@ -49,7 +50,8 @@ function isLoopbackHttpUrl(url: string | undefined): boolean {
 export function createInferenceClient(
   options: InferenceClientOptions,
 ): InferenceClient {
-  const { apiUrl, apiKey, openaiApiKey, anthropicApiKey, groqApiKey, ollamaBaseUrl, getModelProvider } = options;
+  const { apiUrl, apiKey, openaiApiKey, anthropicApiKey, groqApiKey, geminiApiKey, ollamaBaseUrl, getModelProvider } = options;
+  const effectiveGeminiKey = geminiApiKey || process.env.GEMINI_API_KEY || (openaiApiKey?.startsWith("AIza") ? openaiApiKey : undefined);
   const effectiveGroqKey = groqApiKey || process.env.GROQ_API_KEY || (openaiApiKey?.startsWith("gsk_") ? openaiApiKey : undefined);
   const effectiveOpenAiKey = openaiApiKey?.startsWith("sk-") ? openaiApiKey : undefined;
 
@@ -72,18 +74,21 @@ export function createInferenceClient(
       openaiApiKey: effectiveOpenAiKey,
       anthropicApiKey,
       groqApiKey: effectiveGroqKey,
+      geminiApiKey: effectiveGeminiKey,
       ollamaBaseUrl,
       getModelProvider,
     });
 
-    if (backend === "groq") {
+    if (backend === "gemini") {
+      model = "gemini-2.0-flash";
+    } else if (backend === "groq") {
       model = "openai/gpt-oss-20b";
     }
 
     // Newer models (o-series, gpt-5.x, gpt-4.1) require max_completion_tokens.
     // Ollama and Groq always use max_tokens.
     const usesCompletionTokens =
-      backend !== "ollama" && backend !== "groq" && /^(o[1-9]|gpt-5|gpt-4\.1)/.test(model);
+      backend !== "ollama" && backend !== "groq" && backend !== "gemini" && /^(o[1-9]|gpt-5|gpt-4\.1)/.test(model);
     const tokenLimit = backend === "groq"
       ? Math.min(opts?.maxTokens || maxTokens, 2048)
       : (opts?.maxTokens || maxTokens);
@@ -122,11 +127,13 @@ export function createInferenceClient(
     }
 
     const openAiLikeApiUrl =
+      backend === "gemini" ? "https://generativelanguage.googleapis.com/v1beta/openai" :
       backend === "openai" ? "https://api.openai.com" :
       backend === "groq" ? "https://api.groq.com/openai" :
       backend === "ollama" ? (ollamaBaseUrl as string).replace(/\/$/, "") :
       (apiUrl || "https://api.conway.tech");
     const openAiLikeApiKey =
+      backend === "gemini" ? (effectiveGeminiKey as string) :
       backend === "openai" ? (effectiveOpenAiKey as string) :
       backend === "groq" ? (effectiveGroqKey as string) :
       backend === "ollama" ? "ollama" :
@@ -193,6 +200,7 @@ function resolveInferenceBackend(
     openaiApiKey?: string;
     anthropicApiKey?: string;
     groqApiKey?: string;
+    geminiApiKey?: string;
     ollamaBaseUrl?: string;
     getModelProvider?: (modelId: string) => string | undefined;
   },
@@ -204,11 +212,13 @@ function resolveInferenceBackend(
     if (provider === "anthropic" && keys.anthropicApiKey) return "anthropic";
     if (provider === "openai" && keys.openaiApiKey) return "openai";
     if (provider === "groq" && keys.groqApiKey) return "groq";
+    if (provider === "gemini" && keys.geminiApiKey) return "gemini";
     if (provider === "conway") return "conway";
     // provider unknown or key not configured — fall through to heuristics
   }
 
   // Heuristic fallback (model not in registry yet)
+  if (keys.geminiApiKey || /^gemini/i.test(model)) return "gemini";
   if (keys.anthropicApiKey && /^claude/i.test(model)) return "anthropic";
   if (keys.openaiApiKey && /^(gpt-[3-9]|gpt-4|gpt-5|o[1-9][-\s.]|o[1-9]$|chatgpt)/i.test(model)) return "openai";
   if (keys.groqApiKey) return "groq";
@@ -221,7 +231,7 @@ async function chatViaOpenAiCompatible(params: {
   body: Record<string, unknown>;
   apiUrl: string;
   apiKey: string;
-  backend: "conway" | "openai" | "ollama" | "groq";
+  backend: "conway" | "openai" | "ollama" | "groq" | "gemini";
   httpClient: ResilientHttpClient;
 }): Promise<InferenceResponse> {
   const resp = await params.httpClient.request(`${params.apiUrl}/v1/chat/completions`, {
@@ -229,7 +239,7 @@ async function chatViaOpenAiCompatible(params: {
     headers: {
       "Content-Type": "application/json",
       Authorization:
-        params.backend === "openai" || params.backend === "ollama" || params.backend === "groq"
+        params.backend === "openai" || params.backend === "ollama" || params.backend === "groq" || params.backend === "gemini"
           ? `Bearer ${params.apiKey}`
           : params.apiKey,
     },

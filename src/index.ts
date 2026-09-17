@@ -331,6 +331,7 @@ async function run(): Promise<void> {
     openaiApiKey: config.openaiApiKey,
     anthropicApiKey: config.anthropicApiKey,
     groqApiKey: process.env.GROQ_API_KEY || (config.openaiApiKey?.startsWith("gsk_") ? config.openaiApiKey : undefined),
+    geminiApiKey: process.env.GEMINI_API_KEY || (config.openaiApiKey?.startsWith("AIza") ? config.openaiApiKey : undefined),
     ollamaBaseUrl,
     getModelProvider: (modelId) => modelRegistry.get(modelId)?.provider,
   });
