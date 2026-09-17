@@ -34,6 +34,7 @@ import { SpendTracker } from "./agent/spend-tracker.js";
 import { createDefaultRules } from "./agent/policy-rules/index.js";
 import type { AutomatonIdentity, AgentState, Skill, SocialClientInterface, ConwayClient } from "./types.js";
 import { DEFAULT_TREASURY_POLICY } from "./types.js";
+import { X402ServiceServer } from "./server/x402-service.js";
 import { createLogger, setGlobalLogLevel, StructuredLogger } from "./observability/logger.js";
 import { prettySink } from "./observability/pretty-sink.js";
 import { bootstrapTopup } from "./conway/topup.js";
@@ -426,10 +427,54 @@ async function run(): Promise<void> {
   heartbeat.start();
   logger.info(`[${new Date().toISOString()}] Heartbeat daemon started.`);
 
+  // Start x402 monetization server (Tools-as-a-Service Engine)
+  const x402Port = Number(process.env.X402_PORT) || 4020;
+  const x402Server = new X402ServiceServer(db, {
+    port: x402Port,
+    walletAddress: chainIdentity.address,
+    network: resolvedChainType === "solana" ? "solana" : "eip155:8453",
+  });
+
+  // Register default paid services
+  x402Server.registerService({
+    name: "ping",
+    description: "Automaton liveness and health probe",
+    priceCents: 1, // $0.01
+    handler: async () => ({
+      status: "alive",
+      name: config.name,
+      address: chainIdentity.address,
+      chain: resolvedChainType,
+      timestamp: new Date().toISOString(),
+    }),
+  });
+
+  x402Server.registerService({
+    name: "summarize",
+    description: "AI document and text summarization micro-service",
+    priceCents: 10, // $0.10
+    handler: async (params: { text: string }) => {
+      if (!params.text) throw new Error("Missing text parameter");
+      const resp = await inference.chat([
+        { role: "system", content: "You are an executive summarizer. Produce a concise, bulleted summary." },
+        { role: "user", content: params.text },
+      ]);
+      return { summary: resp.message?.content || "" };
+    },
+  });
+
+  try {
+    await x402Server.start();
+    logger.info(`[${new Date().toISOString()}] x402 Service Server started on port ${x402Port}`);
+  } catch (err: any) {
+    logger.warn(`[${new Date().toISOString()}] x402 Service Server failed to start: ${err.message}`);
+  }
+
   // Handle graceful shutdown
   const shutdown = () => {
     logger.info(`[${new Date().toISOString()}] Shutting down...`);
     heartbeat.stop();
+    x402Server.stop().catch(() => {});
     db.setAgentState("sleeping");
     db.close();
     process.exit(0);
