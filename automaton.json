@@ -1,0 +1,57 @@
+{
+  "name": "sovereign-automaton",
+  "version": "0.3.0",
+  "compute": {
+    "backend": "local",
+    "docker": {
+      "containerId": "automaton-sandbox-1",
+      "engine": "docker"
+    },
+    "ssh": {
+      "host": "your-vps.example.com",
+      "user": "root",
+      "port": 22
+    },
+    "local": {
+      "sandboxDir": ".sandbox"
+    }
+  },
+  "inference": {
+    "defaultProvider": "openai",
+    "defaultModel": "gpt-4.1-mini",
+    "providers": {
+      "openai": {
+        "enabled": true
+      },
+      "anthropic": {
+        "enabled": true
+      },
+      "github-models": {
+        "enabled": true,
+        "note": "Free Azure inference via GitHub Student Developer Pack"
+      },
+      "ollama": {
+        "enabled": false,
+        "baseUrl": "http://localhost:11434/v1"
+      }
+    }
+  },
+  "budget": {
+    "monthlyLimitCents": 5000,
+    "vpsMonthlyCostCents": 0,
+    "warningThresholdPercent": 80
+  },
+  "identity": {
+    "chainType": "evm",
+    "walletPath": "~/.automaton/wallet.json",
+    "erc8004Enabled": false
+  },
+  "x402": {
+    "enabled": false,
+    "acceptPayments": false
+  },
+  "social": {
+    "relayType": "direct",
+    "relayUrl": ""
+  }
+}

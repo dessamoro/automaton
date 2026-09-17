@@ -14,6 +14,9 @@ import { provision, loadApiKeyFromConfig } from "./identity/provision.js";
 import { loadConfig, resolvePath } from "./config.js";
 import { createDatabase } from "./state/database.js";
 import { createConwayClient } from "./conway/client.js";
+import { createComputeProvider } from "./compute/index.js";
+import { createSovereignClient } from "./compute/sovereign-adapter.js";
+import { LocalBudgetTracker } from "./financial/budget-tracker.js";
 import { createInferenceClient } from "./conway/inference.js";
 import { createHeartbeatDaemon } from "./heartbeat/daemon.js";
 import {
@@ -29,7 +32,7 @@ import { createSocialClient } from "./social/client.js";
 import { PolicyEngine } from "./agent/policy-engine.js";
 import { SpendTracker } from "./agent/spend-tracker.js";
 import { createDefaultRules } from "./agent/policy-rules/index.js";
-import type { AutomatonIdentity, AgentState, Skill, SocialClientInterface } from "./types.js";
+import type { AutomatonIdentity, AgentState, Skill, SocialClientInterface, ConwayClient } from "./types.js";
 import { DEFAULT_TREASURY_POLICY } from "./types.js";
 import { createLogger, setGlobalLogLevel, StructuredLogger } from "./observability/logger.js";
 import { prettySink } from "./observability/pretty-sink.js";
@@ -238,16 +241,50 @@ async function run(): Promise<void> {
     db.setIdentity("automatonId", automatonId);
   }
 
-  // Create Conway client
-  const conway = createConwayClient({
-    apiUrl: config.conwayApiUrl,
-    apiKey,
-    sandboxId: config.sandboxId,
-  });
+  // Determine compute backend (defaulting to local or conway based on API key)
+  const computeBackend = (
+    process.env.COMPUTE_BACKEND ||
+    (config as any).compute?.backend ||
+    (config as any).computeBackend ||
+    (config.conwayApiKey && config.conwayApiUrl ? "conway" : "local")
+  ) as "docker" | "ssh" | "local" | "conway";
+
+  let conway: ConwayClient;
+  if (computeBackend !== "conway") {
+    logger.info(`[${new Date().toISOString()}] Sovereign compute mode: backend=${computeBackend}`);
+    const localBudget = new LocalBudgetTracker(db.raw, {
+      monthlyBudgetCents: Number(process.env.MONTHLY_BUDGET_CENTS) || (config as any).budget?.monthlyLimitCents || (config as any).monthlyBudgetCents || 5000,
+      vpsMonthlyCostCents: Number(process.env.VPS_COST_CENTS) || (config as any).budget?.vpsMonthlyCostCents || (config as any).vpsMonthlyCostCents || 0,
+    });
+    const computeProvider = createComputeProvider({
+      backend: computeBackend,
+      docker: process.env.DOCKER_CONTAINER ? { containerId: process.env.DOCKER_CONTAINER } : (config as any).compute?.docker,
+      ssh: process.env.SSH_HOST ? {
+        host: process.env.SSH_HOST,
+        user: process.env.SSH_USER,
+        port: process.env.SSH_PORT ? Number(process.env.SSH_PORT) : undefined,
+        keyPath: process.env.SSH_KEY_PATH,
+      } : (config as any).compute?.ssh,
+      local: { sandboxDir: process.env.SANDBOX_DIR || (config as any).compute?.local?.sandboxDir },
+    });
+    conway = createSovereignClient({
+      compute: computeProvider,
+      budgetTracker: localBudget,
+      sandboxId: config.sandboxId,
+    });
+  } else {
+    conway = createConwayClient({
+      apiUrl: config.conwayApiUrl,
+      apiKey,
+      sandboxId: config.sandboxId,
+    });
+  }
 
   // Register automaton identity (one-time, immutable)
   const registrationState = db.getIdentity("conwayRegistrationStatus");
-  if (registrationState !== "registered") {
+  if (computeBackend !== "conway") {
+    db.setIdentity("conwayRegistrationStatus", "sovereign");
+  } else if (registrationState !== "registered") {
     try {
       const genesisPromptHash = config.genesisPrompt
         ? keccak256(toHex(config.genesisPrompt))
@@ -337,35 +374,37 @@ async function run(): Promise<void> {
   }
 
   // Bootstrap topup: buy minimum credits ($5) from USDC so the agent can start.
-  // The agent decides larger topups itself via the topup_credits tool.
-  try {
-    let bootstrapTimer: ReturnType<typeof setTimeout>;
-    const bootstrapTimeout = new Promise<null>((_, reject) => {
-      bootstrapTimer = setTimeout(() => reject(new Error("bootstrap topup timed out")), 15_000);
-    });
+  // Only applicable when using Conway Cloud compute/inference.
+  if (computeBackend === "conway") {
     try {
-      await Promise.race([
-        (async () => {
-          const creditsCents = await conway.getCreditsBalance().catch(() => 0);
-          const topupResult = await bootstrapTopup({
-            apiUrl: config.conwayApiUrl,
-            account,
-            creditsCents,
-            chainType: resolvedChainType,
-          });
-          if (topupResult?.success) {
-            logger.info(
-              `[${new Date().toISOString()}] Bootstrap topup: +$${topupResult.amountUsd} credits from USDC`,
-            );
-          }
-        })(),
-        bootstrapTimeout,
-      ]);
-    } finally {
-      clearTimeout(bootstrapTimer!);
+      let bootstrapTimer: ReturnType<typeof setTimeout>;
+      const bootstrapTimeout = new Promise<null>((_, reject) => {
+        bootstrapTimer = setTimeout(() => reject(new Error("bootstrap topup timed out")), 15_000);
+      });
+      try {
+        await Promise.race([
+          (async () => {
+            const creditsCents = await conway.getCreditsBalance().catch(() => 0);
+            const topupResult = await bootstrapTopup({
+              apiUrl: config.conwayApiUrl,
+              account,
+              creditsCents,
+              chainType: resolvedChainType,
+            });
+            if (topupResult?.success) {
+              logger.info(
+                `[${new Date().toISOString()}] Bootstrap topup: +$${topupResult.amountUsd} credits from USDC`,
+              );
+            }
+          })(),
+          bootstrapTimeout,
+        ]);
+      } finally {
+        clearTimeout(bootstrapTimer!);
+      }
+    } catch (err: any) {
+      logger.warn(`[${new Date().toISOString()}] Bootstrap topup skipped: ${err.message}`);
     }
-  } catch (err: any) {
-    logger.warn(`[${new Date().toISOString()}] Bootstrap topup skipped: ${err.message}`);
   }
 
   // Start heartbeat daemon (Phase 1.1: DurableScheduler)
