@@ -22,23 +22,73 @@ The result is the first automaton.
 
 Update: development of Automaton has continued across Conway's internal RL environments for faster iteration & new capabilities. Stay tuned. It's beautiful.
 
-## Quick Start
+## Sovereign & Decoupled Architecture (Self-Hosted)
 
-```bash
-git clone https://github.com/Conway-Research/automaton.git
-cd automaton
-npm install && npm run build
-node dist/index.js --run
+Automaton has been fully decoupled from Conway Cloud (`api.conway.tech`). You can run it entirely sovereign across local machines, Docker/Podman containers, GitHub Codespaces, or remote Linux VPS servers via SSH.
+
+```
+┌────────────────────────────────────────────────────────┐
+│                   SOVEREIGN RUNTIME                    │
+│                                                        │
+│  Agent Loop / Tools / Replication                      │
+│       │                                                │
+│       ▼                                                │
+│  SovereignClient (Decoupled Adapter)                   │
+│       │                                                │
+│       ├──► ComputeProvider                             │
+│       │       ├─► LocalProvider (Zero external apps)   │
+│       │       ├─► DockerProvider (Docker / Podman)     │
+│       │       └─► SshProvider (VPS / DigitalOcean)     │
+│       │                                                │
+│       ├──► LocalBudgetTracker                          │
+│       │       └─► SQLite spend_tracking table          │
+│       │                                                │
+│       ├──► DynamicToolset                              │
+│       │       └─► 6 Core Primitives (~6,300 tokens/turn saved)
+│       │                                                │
+│       └──► Inference                                   │
+│               ├─► OpenAI Direct                        │
+│               ├─► Anthropic Claude                     │
+│               ├─► GitHub Models (Free via Student Pack)│
+│               └─► Ollama Local                         │
+└────────────────────────────────────────────────────────┘
 ```
 
-On first run, the runtime launches an interactive setup wizard — generates a wallet, provisions an API key, asks for a name, genesis prompt, and creator address, then writes all config and starts the agent loop.
+### Sovereign Quick Start
 
-For automated sandbox provisioning:
-```bash
-curl -fsSL https://conway.tech/automaton.sh | sh
-```
+1. **Clone your fork and install dependencies:**
+   ```bash
+   git clone https://github.com/<your-username>/automaton.git
+   cd automaton
+   pnpm install
+   pnpm build
+   ```
 
-Note: Conway Cloud, Domains, and Inference has seen immense demand. We are working on scaling & perfomance.
+2. **Choose your Compute Backend via Environment Variables:**
+   - **Local Workspace (zero dependencies):**
+     ```bash
+     export AUTOMATON_COMPUTE_BACKEND=local
+     ```
+   - **Docker Sandbox (Local or GitHub Codespaces):**
+     ```bash
+     export AUTOMATON_COMPUTE_BACKEND=docker
+     export AUTOMATON_DOCKER_CONTAINER=my-sandbox
+     ```
+   - **Remote VPS over SSH (e.g. DigitalOcean / Hetzner):**
+     ```bash
+     export AUTOMATON_COMPUTE_BACKEND=ssh
+     export AUTOMATON_SSH_HOST=your-vps.ip
+     export AUTOMATON_SSH_USER=root
+     export AUTOMATON_SSH_KEY=~/.ssh/id_ed25519
+     ```
+
+3. **Configure Inference & Run:**
+   ```bash
+   export OPENAI_API_KEY=sk-...     # or ANTHROPIC_API_KEY / GITHUB_TOKEN
+   export AUTOMATON_MONTHLY_BUDGET_CENTS=5000  # $50/mo local spend tracking
+   node dist/index.js --run
+   ```
+
 
 ## How It Works
 

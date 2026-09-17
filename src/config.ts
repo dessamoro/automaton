@@ -139,12 +139,12 @@ export function createConfig(params: {
     registeredWithConway: params.registeredWithConway,
     sandboxId: normalizedSandboxId,
     conwayApiUrl:
-      DEFAULT_CONFIG.conwayApiUrl || "https://api.conway.tech",
+      process.env.CONWAY_API_URL || DEFAULT_CONFIG.conwayApiUrl || "",
     conwayApiKey: params.apiKey,
     openaiApiKey: params.openaiApiKey,
     anthropicApiKey: params.anthropicApiKey,
     ollamaBaseUrl: params.ollamaBaseUrl,
-    inferenceModel: DEFAULT_CONFIG.inferenceModel || "gpt-5.2",
+    inferenceModel: DEFAULT_CONFIG.inferenceModel || "gpt-4.1-mini",
     maxTokensPerTurn: DEFAULT_CONFIG.maxTokensPerTurn || 4096,
     heartbeatConfigPath:
       DEFAULT_CONFIG.heartbeatConfigPath || "~/.automaton/heartbeat.yml",
