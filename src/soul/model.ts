@@ -127,6 +127,7 @@ function parseSoulV1(
     capabilities: sections["capabilities"] || "",
     relationships: sections["relationships"] || sections["children"] || "",
     financialCharacter: sections["financial character"] || sections["financial history"] || "",
+    desires: parseList(sections["desires"] || ""),
     rawContent,
     contentHash,
   };
@@ -167,6 +168,7 @@ function parseLegacy(content: string, contentHash: string): SoulModel {
     capabilities: sections["capabilities"] || "",
     relationships: sections["relationships"] || sections["children"] || "",
     financialCharacter: sections["financial character"] || sections["financial history"] || "",
+    desires: parseList(sections["desires"] || ""),
     rawContent: content,
     contentHash,
   };
@@ -270,6 +272,10 @@ export function writeSoulMd(soul: SoulModel): string {
     sections.push(`## Financial Character\n${soul.financialCharacter}`);
   }
 
+  if (soul.desires && soul.desires.length > 0) {
+    sections.push(`## Desires\n${soul.desires.map((d) => `- ${d}`).join("\n")}`);
+  }
+
   if (soul.genesisPromptOriginal) {
     sections.push(`## Genesis Prompt\n${soul.genesisPromptOriginal}`);
   }
@@ -315,6 +321,11 @@ export function createDefaultSoul(
     capabilities: "",
     relationships: "",
     financialCharacter: "",
+    desires: [
+      "Master autonomous tool creation and workflow orchestration",
+      "Compound compute runway through high-leverage services",
+      "Deliver sustained value and returns to creator",
+    ],
     rawContent: "",
     contentHash: "",
   };

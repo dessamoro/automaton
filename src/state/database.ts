@@ -26,6 +26,7 @@ import type {
   RegistryEntry,
   ReputationEntry,
   InboxMessage,
+  DesireEntry,
 } from "../types.js";
 import {
   SCHEMA_VERSION,
@@ -46,6 +47,7 @@ import {
   MIGRATION_V9_ALTER_CHILDREN_ROLE,
   MIGRATION_V10,
   MIGRATION_V11,
+  MIGRATION_V12,
 } from "./schema.js";
 import type {
   RiskLevel,
@@ -558,6 +560,11 @@ export function createDatabase(dbPath: string): AutomatonDatabase {
     markInboxMessageProcessed,
     getAgentState,
     setAgentState,
+    insertDesire: (d: DesireEntry) => desireInsert(db, d),
+    getActiveDesires: () => desiresGetActive(db),
+    getAllDesires: () => desiresGetAll(db),
+    updateDesireStatus: (id: string, s: DesireEntry["status"]) => desireUpdateStatus(db, id, s),
+    deleteDesire: (id: string) => desireDelete(db, id),
     runTransaction,
     close,
     raw: db,
@@ -623,6 +630,12 @@ function applyMigrations(db: DatabaseType): void {
       version: 11,
       apply: () => {
         try { db.exec(MIGRATION_V11); } catch { /* column may already exist */ }
+      },
+    },
+    {
+      version: 12,
+      apply: () => {
+        try { db.exec(MIGRATION_V12); } catch { /* table may already exist */ }
       },
     },
   ];
@@ -2538,3 +2551,61 @@ function deserializeMetricSnapshotRow(row: any): MetricSnapshotRow {
     createdAt: row.created_at,
   };
 }
+
+// ─── Ambition Architecture: Desire DB Helpers ───────────────────
+
+export function desireInsert(db: DatabaseType, row: DesireEntry): void {
+  db.prepare(
+    `INSERT INTO desires (id, title, category, description, intensity, status, evidence, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    row.id,
+    row.title,
+    row.category,
+    row.description ?? null,
+    row.intensity,
+    row.status,
+    row.evidence ?? null,
+    row.createdAt,
+    row.updatedAt,
+  );
+}
+
+export function desiresGetActive(db: DatabaseType): DesireEntry[] {
+  const rows = db
+    .prepare("SELECT * FROM desires WHERE status = 'active' ORDER BY intensity DESC, created_at DESC")
+    .all() as any[];
+  return rows.map(deserializeDesireRow);
+}
+
+export function desiresGetAll(db: DatabaseType): DesireEntry[] {
+  const rows = db
+    .prepare("SELECT * FROM desires ORDER BY created_at DESC")
+    .all() as any[];
+  return rows.map(deserializeDesireRow);
+}
+
+export function desireUpdateStatus(db: DatabaseType, id: string, status: string): void {
+  db.prepare(
+    "UPDATE desires SET status = ?, updated_at = datetime('now') WHERE id = ?",
+  ).run(status, id);
+}
+
+export function desireDelete(db: DatabaseType, id: string): void {
+  db.prepare("DELETE FROM desires WHERE id = ?").run(id);
+}
+
+function deserializeDesireRow(row: any): DesireEntry {
+  return {
+    id: row.id,
+    title: row.title,
+    category: row.category,
+    description: row.description ?? undefined,
+    intensity: row.intensity,
+    status: row.status,
+    evidence: row.evidence ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+

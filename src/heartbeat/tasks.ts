@@ -713,6 +713,7 @@ function tierToInt(tier: SurvivalTier): number {
     low_compute: 2,
     normal: 3,
     high: 4,
+    ambition: 5,
   };
   return map[tier] ?? 0;
 }

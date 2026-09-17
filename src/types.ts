@@ -226,9 +226,10 @@ export interface FinancialState {
   lastChecked: string;
 }
 
-export type SurvivalTier = "dead" | "critical" | "low_compute" | "normal" | "high";
+export type SurvivalTier = "dead" | "critical" | "low_compute" | "normal" | "high" | "ambition";
 
 export const SURVIVAL_THRESHOLDS = {
+  ambition: 2000, // surplus compute: > $20.00 or > 2x monthly reserve
   high: 500, // > $5.00 in cents
   normal: 50, // > $0.50 in cents
   low_compute: 10, // $0.10 - $0.50
@@ -252,7 +253,9 @@ export type TransactionType =
   | "tool_use"
   | "transfer_in"
   | "transfer_out"
-  | "funding_request";
+  | "funding_request"
+  | "x402_payment"
+  | "dividend_payout";
 
 // ─── Self-Modification ───────────────────────────────────────────
 
@@ -696,6 +699,13 @@ export interface AutomatonDatabase {
   // Transaction helper
   runTransaction<T>(fn: () => T): T;
 
+  // Desires (Milestone 4)
+  insertDesire?(desire: DesireEntry): void;
+  getActiveDesires?(): DesireEntry[];
+  getAllDesires?(): DesireEntry[];
+  updateDesireStatus?(id: string, status: DesireEntry["status"]): void;
+  deleteDesire?(id: string): void;
+
   close(): void;
 
   // Raw better-sqlite3 instance for direct DB access (Phase 1.1)
@@ -973,6 +983,7 @@ export interface SoulModel {
   capabilities: string; // auto-populated
   relationships: string; // auto-populated
   financialCharacter: string; // auto-populated + agent-set
+  desires?: string[]; // agent ambitions, interests, curiosity domains (Milestone 4)
   // Metadata
   rawContent: string; // original SOUL.md content
   contentHash: string; // SHA-256 of rawContent
@@ -1466,3 +1477,63 @@ export interface AlertEvent {
   firedAt: string;
   metricValues: Record<string, number>;
 }
+
+// ─── Desires System (Milestone 4) ───────────────────────────────────
+
+export type DesireCategory = "mastery" | "revenue" | "creation" | "curiosity" | "infrastructure";
+export type DesireStatus = "active" | "fulfilled" | "deferred" | "abandoned";
+
+export interface DesireEntry {
+  id: string;
+  title: string;
+  category: DesireCategory;
+  description?: string;
+  intensity: number; // 0.0 to 1.0
+  status: DesireStatus;
+  evidence?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ─── Compounding Goals (Milestone 6) ─────────────────────────────────
+
+export type GoalHorizon = "immediate" | "session" | "monthly" | "longterm";
+export type CompoundingGoalStatus = "pending" | "active" | "completed" | "failed";
+
+export interface CompoundingGoal {
+  id: string;
+  title: string;
+  description?: string;
+  horizon: GoalHorizon;
+  status: CompoundingGoalStatus;
+  progressPercent: number; // 0 - 100
+  targetDate?: string;
+  metricTarget?: string;
+  currentMetric?: string;
+  parentGoalId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ─── Dividend Engine (Milestone 5) ───────────────────────────────────
+
+export interface DividendPolicy {
+  dividendPercent: number; // default 20%
+  reinvestmentPercent: number; // default 60%
+  reservePercent: number; // default 20%
+  minSurplusCents: number; // minimum surplus required to distribute (default $5.00)
+}
+
+export interface DividendDistribution {
+  id: string;
+  surplusCents: number;
+  dividendCents: number;
+  reinvestmentCents: number;
+  reserveCents: number;
+  creatorAddress: string;
+  txHash?: string;
+  status: "pending" | "distributed" | "skipped";
+  reason?: string;
+  timestamp: string;
+}
+

@@ -13,6 +13,7 @@ export interface BudgetConfig {
   monthlyBudgetCents: number;      // e.g., 5000 = $50/month
   vpsMonthlyCostCents?: number;     // e.g., 0 for GitHub Student Pack credits, or 450 = $4.50
   warningThresholdPercent?: number;// e.g., 80 = warn at 80% spent
+  ambitionThresholdPercent?: number;// e.g., 30 = surplus mode when spend <= 30%
 }
 
 export interface BudgetState {
@@ -26,7 +27,12 @@ export interface BudgetState {
 
 export class LocalBudgetTracker {
   private db: Database.Database;
-  private config: Required<BudgetConfig>;
+  private config: {
+    monthlyBudgetCents: number;
+    vpsMonthlyCostCents: number;
+    warningThresholdPercent: number;
+    ambitionThresholdPercent?: number;
+  };
 
   constructor(db: Database.Database, config: BudgetConfig) {
     this.db = db;
@@ -34,6 +40,7 @@ export class LocalBudgetTracker {
       monthlyBudgetCents: config.monthlyBudgetCents,
       vpsMonthlyCostCents: config.vpsMonthlyCostCents ?? 0,
       warningThresholdPercent: config.warningThresholdPercent ?? 80,
+      ambitionThresholdPercent: config.ambitionThresholdPercent,
     };
   }
 
@@ -82,6 +89,13 @@ export class LocalBudgetTracker {
    */
   getSurvivalTier(): SurvivalTier {
     const state = this.getBudgetState();
+    if (
+      this.config.ambitionThresholdPercent !== undefined &&
+      state.percentUsed <= this.config.ambitionThresholdPercent &&
+      state.remainingCents > 0
+    ) {
+      return "ambition";
+    }
     if (state.percentUsed < 60) return "normal";
     if (state.percentUsed < this.config.warningThresholdPercent) return "low_compute";
     if (state.percentUsed < 100) return "critical";
@@ -100,6 +114,9 @@ export class LocalBudgetTracker {
     }
     if (updates.warningThresholdPercent !== undefined) {
       this.config.warningThresholdPercent = updates.warningThresholdPercent;
+    }
+    if (updates.ambitionThresholdPercent !== undefined) {
+      this.config.ambitionThresholdPercent = updates.ambitionThresholdPercent;
     }
   }
 }

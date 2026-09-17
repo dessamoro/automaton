@@ -5,7 +5,7 @@
  * The database IS the automaton's memory.
  */
 
-export const SCHEMA_VERSION = 11;
+export const SCHEMA_VERSION = 12;
 
 export const CREATE_TABLES = `
   -- Schema version tracking
@@ -679,3 +679,26 @@ export const MIGRATION_V10 = `
   CREATE INDEX idx_knowledge_category ON knowledge_store(category);
   CREATE INDEX idx_knowledge_key ON knowledge_store(key);
 `;
+
+// === Ambition Architecture: Desires Table ===
+
+export const MIGRATION_V12 = `
+  -- Schema version: 12
+  -- Tables: desires (Ambition and Motivational Architecture)
+
+  CREATE TABLE IF NOT EXISTS desires (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    category TEXT NOT NULL, -- mastery | revenue | creation | curiosity | infrastructure
+    description TEXT,
+    intensity REAL NOT NULL DEFAULT 1.0,
+    status TEXT NOT NULL DEFAULT 'active', -- active | fulfilled | deferred | abandoned
+    evidence TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_desires_status ON desires(status);
+  CREATE INDEX IF NOT EXISTS idx_desires_category ON desires(category);
+`;
+

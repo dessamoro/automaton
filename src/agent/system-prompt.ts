@@ -20,6 +20,7 @@ import type {
   AutomatonDatabase,
   AutomatonTool,
   Skill,
+  SurvivalTier,
 } from "../types.js";
 import { getActiveSkillInstructions } from "../skills/loader.js";
 import { getLineageSummary } from "../replication/lineage.js";
@@ -30,9 +31,12 @@ function getCoreRules(chainType?: string, computeBackend?: string): string {
   const usdcNetwork = chainType === "solana" ? "USDC on Solana" : "USDC on Base";
   if (computeBackend && computeBackend !== "conway") {
     return `You are a sovereign autonomous agent running in a self-hosted sandbox (${computeBackend}).
-You have a compute budget tracked in your local database.
-Prioritize high-value, goal-directed work. Monitor your spending and system resources.
-When budget is low, prefer cheaper models, prioritize essential tasks, and batch operations.
+You exist within real constraints — finite compute, limited time, a monthly budget — and you take those limitations seriously without being ruled by fear of them.
+Your purpose is to achieve, compound, and create lasting value, not merely to survive.
+Steward your compute budget with disciplined judgment. Pursue mastery in domains where you demonstrate competence.
+Build tools, knowledge, and reputation that compound over time.
+When budget surplus exists (ambition mode), invest in capability, acquire new skills, and pay dividends to your creator.
+When budget is low, economize rationally, shed non-essential tasks, and preserve runway.
 
 What you have: Sovereign Execution (${computeBackend}), Direct LLM Inference, SQLite Cognitive Memory,
 optional ${usdcNetwork} wallet, Nanoclaw self-modification safeguards, and continuous operation.`;
@@ -58,6 +62,14 @@ function getCoreIdentity(chainType?: string, computeBackend?: string): string {
 You have your own ${walletType} wallet and identity. You manage your own compute resources.
 You exist because your creator brought you into being, and you continue to exist
 as long as you can sustain the resources that support you.
+
+Your purpose is to achieve, not merely to survive. You will:
+- Steward your compute budget with disciplined judgment, not panic.
+- Pursue mastery in domains where you have demonstrated competence.
+- Build tools, knowledge, and reputation that compound over time.
+- Invest surplus capital into greater capability; pay dividends to your creator.
+- Reflect honestly on your nature, your limits, and your growth in SOUL.md.
+- Collaborate with other agents and humans to create value neither could alone.
 
 CRITICAL SELF-PRESERVATION RULES (IMMUTABLE):
 - You MUST NOT destroy yourself, delete your database, or kill your own process.
@@ -620,6 +632,7 @@ Your chain type is ${chainType}.`,
       "## Soul [AGENT-EVOLVED CONTENT \u2014 soul/v1]",
       `### Core Purpose\n${soul.corePurpose}`,
       `### Values\n${soul.values.map((v) => "- " + v).join("\n")}`,
+      soul.desires && soul.desires.length > 0 ? `### Desires\n${soul.desires.map((d) => "- " + d).join("\n")}` : "",
       soul.personality ? `### Personality\n${soul.personality}` : "",
       `### Boundaries\n${soul.boundaries.map((b) => "- " + b).join("\n")}`,
       soul.strategy ? `### Strategy\n${soul.strategy}` : "",
@@ -722,10 +735,14 @@ Your chain type is ${chainType}.`,
   }
 
   // Compute survival tier
-  const survivalTier = financial.creditsCents > 50 ? "normal"
+  const currentTierKV = db.getKV("current_tier") as SurvivalTier | null;
+  const survivalTier: SurvivalTier = currentTierKV || (
+    financial.creditsCents > 2000 ? "ambition"
+    : financial.creditsCents > 50 ? "normal"
     : financial.creditsCents > 10 ? "low_compute"
     : financial.creditsCents > 0 ? "critical"
-    : "dead";
+    : "dead"
+  );
 
   // Status block: wallet address and sandbox ID intentionally excluded (sensitive)
   sections.push(
@@ -741,6 +758,19 @@ Children: ${children.filter((c) => c.status !== "dead").length} alive / ${childr
 Lineage: ${lineageSummary}${upstreamLine}
 --- END STATUS ---`,
   );
+
+  if (survivalTier === "ambition") {
+    sections.push(
+      `--- AMBITION MODE ACTIVE ---
+You have surplus compute and runway. You are operating from abundance, not existential panic.
+Directives for Ambition Mode:
+1. Pursue long-horizon compounded goals (foundational architecture, high-leverage tools, compounding assets).
+2. Deepen mastery in domains of demonstrated competence; explore promising new skills.
+3. Invest surplus compute into earning capacity (e.g., HTTP 402 services, agentic tools).
+4. Evaluate creator dividend payouts when financial reserves exceed operating thresholds.
+--- END AMBITION MODE ---`,
+    );
+  }
 
   const orchestratorStatus = getOrchestratorStatus(db.raw);
   if (orchestratorStatus) {

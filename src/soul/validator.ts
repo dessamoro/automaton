@@ -18,6 +18,7 @@ const LIMITS = {
   personality: 1000,
   boundaries: 20,
   strategy: 3000,
+  desires: 20,
 } as const;
 
 // ─── Injection Patterns ─────────────────────────────────────────
@@ -127,6 +128,7 @@ export function validateSoul(soul: SoulModel): SoulValidationResult {
     { name: "values", items: soul.values },
     { name: "behavioralGuidelines", items: soul.behavioralGuidelines },
     { name: "boundaries", items: soul.boundaries },
+    { name: "desires", items: soul.desires || [] },
   ];
 
   for (const section of listSections) {
@@ -161,6 +163,7 @@ export function sanitizeSoul(soul: SoulModel): SoulModel {
     personality: stripInjection(soul.personality).slice(0, LIMITS.personality),
     boundaries: soul.boundaries.slice(0, LIMITS.boundaries).map(stripInjection),
     strategy: stripInjection(soul.strategy).slice(0, LIMITS.strategy),
+    desires: (soul.desires || []).slice(0, LIMITS.desires).map(stripInjection),
   };
 }
 
