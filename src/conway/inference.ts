@@ -237,6 +237,29 @@ async function chatViaOpenAiCompatible(params: {
   const endpoint = params.backend === "gemini"
     ? `${params.apiUrl}/chat/completions`
     : `${params.apiUrl}/v1/chat/completions`;
+
+  // Gemini's OpenAI-compat layer requires:
+  // 1. System role as top-level "system" param (extracted from messages)
+  // 2. At least one non-system user/assistant message in the messages array
+  let requestBody = params.body;
+  if (params.backend === "gemini") {
+    const messages = (params.body.messages as any[]) || [];
+    const systemMsgs = messages.filter((m: any) => m.role === "system");
+    const nonSystemMsgs = messages.filter((m: any) => m.role !== "system");
+    const systemText = systemMsgs.map((m: any) =>
+      typeof m.content === "string" ? m.content : JSON.stringify(m.content)
+    ).join("\n\n");
+    // If all messages were system-only, add a minimal user prompt
+    const finalMessages = nonSystemMsgs.length > 0
+      ? nonSystemMsgs
+      : [{ role: "user", content: "Begin." }];
+    requestBody = {
+      ...params.body,
+      messages: finalMessages,
+      ...(systemText ? { system: systemText } : {}),
+    };
+  }
+
   const resp = await params.httpClient.request(endpoint, {
     method: "POST",
     headers: {
@@ -246,7 +269,7 @@ async function chatViaOpenAiCompatible(params: {
           ? `Bearer ${params.apiKey}`
           : params.apiKey,
     },
-    body: JSON.stringify(params.body),
+    body: JSON.stringify(requestBody),
     timeout: INFERENCE_TIMEOUT_MS,
   });
 
