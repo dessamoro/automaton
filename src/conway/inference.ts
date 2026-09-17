@@ -80,7 +80,7 @@ export function createInferenceClient(
     });
 
     if (backend === "gemini") {
-      model = "gemini-2.0-flash";
+      model = "gemini-3.6-flash";
     } else if (backend === "groq") {
       model = "openai/gpt-oss-20b";
     }
@@ -234,7 +234,10 @@ async function chatViaOpenAiCompatible(params: {
   backend: "conway" | "openai" | "ollama" | "groq" | "gemini";
   httpClient: ResilientHttpClient;
 }): Promise<InferenceResponse> {
-  const resp = await params.httpClient.request(`${params.apiUrl}/v1/chat/completions`, {
+  const endpoint = params.backend === "gemini"
+    ? `${params.apiUrl}/chat/completions`
+    : `${params.apiUrl}/v1/chat/completions`;
+  const resp = await params.httpClient.request(endpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
