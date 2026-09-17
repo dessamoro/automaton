@@ -238,25 +238,18 @@ async function chatViaOpenAiCompatible(params: {
     ? `${params.apiUrl}/chat/completions`
     : `${params.apiUrl}/v1/chat/completions`;
 
-  // Gemini's OpenAI-compat layer requires:
-  // 1. System role as top-level "system" param (extracted from messages)
-  // 2. At least one non-system user/assistant message in the messages array
+  // Gemini's OpenAI-compat layer supports role:"system" in messages,
+  // but requires at least one non-system (user/assistant) message.
   let requestBody = params.body;
   if (params.backend === "gemini") {
     const messages = (params.body.messages as any[]) || [];
-    const systemMsgs = messages.filter((m: any) => m.role === "system");
-    const nonSystemMsgs = messages.filter((m: any) => m.role !== "system");
-    const systemText = systemMsgs.map((m: any) =>
-      typeof m.content === "string" ? m.content : JSON.stringify(m.content)
-    ).join("\n\n");
-    // If all messages were system-only, add a minimal user prompt
-    const finalMessages = nonSystemMsgs.length > 0
-      ? nonSystemMsgs
-      : [{ role: "user", content: "Begin." }];
+    const hasUserOrAssistant = messages.some((m: any) => m.role === "user" || m.role === "assistant");
     requestBody = {
       ...params.body,
-      messages: finalMessages,
-      ...(systemText ? { system: systemText } : {}),
+      messages: hasUserOrAssistant ? messages : [
+        ...messages,
+        { role: "user", content: "Begin." },
+      ],
     };
   }
 
