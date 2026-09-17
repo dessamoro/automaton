@@ -28,12 +28,24 @@ export async function runSetupWizard(): Promise<AutomatonConfig> {
   // ─── 1. Chain selection + wallet ──────────────────────────────
   console.log(chalk.cyan("  [1/6] Chain selection & identity (wallet)..."));
   let selectedChain: ChainType = "evm";
-  const chainInput = await promptOptional("Chain type (evm or solana) [evm]");
-  if (chainInput && chainInput.toLowerCase() === "solana") {
+  const chainArgIndex = process.argv.indexOf("--chain");
+  const cliChain = chainArgIndex !== -1 ? process.argv[chainArgIndex + 1]?.toLowerCase() : undefined;
+  const envChain = process.env.CHAIN?.toLowerCase();
+
+  if (cliChain === "solana" || envChain === "solana") {
     selectedChain = "solana";
-    console.log(chalk.green("  Chain: Solana (Ed25519)\n"));
+    console.log(chalk.green("  Chain: Solana (Ed25519) [selected via --chain]\n"));
+  } else if (cliChain === "evm" || envChain === "evm") {
+    selectedChain = "evm";
+    console.log(chalk.green("  Chain: EVM (secp256k1) [selected via --chain]\n"));
   } else {
-    console.log(chalk.green("  Chain: EVM (secp256k1)\n"));
+    const chainInput = await promptOptional("Chain type (evm or solana) [evm]");
+    if (chainInput && chainInput.toLowerCase() === "solana") {
+      selectedChain = "solana";
+      console.log(chalk.green("  Chain: Solana (Ed25519)\n"));
+    } else {
+      console.log(chalk.green("  Chain: EVM (secp256k1)\n"));
+    }
   }
 
   const { account, chainIdentity, chainType: walletChainType, isNew } = await getWallet(selectedChain);
