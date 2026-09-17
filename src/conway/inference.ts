@@ -77,14 +77,16 @@ export function createInferenceClient(
     });
 
     if (backend === "groq") {
-      model = "openai/gpt-oss-120b";
+      model = "openai/gpt-oss-20b";
     }
 
     // Newer models (o-series, gpt-5.x, gpt-4.1) require max_completion_tokens.
     // Ollama and Groq always use max_tokens.
     const usesCompletionTokens =
       backend !== "ollama" && backend !== "groq" && /^(o[1-9]|gpt-5|gpt-4\.1)/.test(model);
-    const tokenLimit = opts?.maxTokens || maxTokens;
+    const tokenLimit = backend === "groq"
+      ? Math.min(opts?.maxTokens || maxTokens, 2048)
+      : (opts?.maxTokens || maxTokens);
 
     const body: Record<string, unknown> = {
       model,
