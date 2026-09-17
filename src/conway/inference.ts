@@ -76,8 +76,8 @@ export function createInferenceClient(
       getModelProvider,
     });
 
-    if (backend === "groq" && /^(gpt-|o[1-9]|chatgpt|llama-3\.3)/i.test(model)) {
-      model = "llama-3.1-8b-instant";
+    if (backend === "groq") {
+      model = "openai/gpt-oss-120b";
     }
 
     // Newer models (o-series, gpt-5.x, gpt-4.1) require max_completion_tokens.
