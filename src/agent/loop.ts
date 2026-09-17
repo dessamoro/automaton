@@ -34,6 +34,7 @@ import {
   toolsToInferenceFormat,
   executeTool,
 } from "./tools.js";
+import { getActiveToolsForTurn } from "../skills/dynamic-toolset.js";
 import { sanitizeInput } from "./injection-defense.js";
 import { getSurvivalTier } from "../conway/credits.js";
 import { getUsdcBalance } from "../conway/x402.js";
@@ -599,7 +600,11 @@ export async function runAgentLoop(
       const survivalTier = getSurvivalTier(financial.creditsCents);
       log(config, `[THINK] Routing inference (tier: ${survivalTier}, model: ${inference.getDefaultModel()})...`);
 
-      const inferenceTools = toolsToInferenceFormat(tools);
+      // Phase 5: Prune active tools to core primitives + contextual skills (saves ~6,300 tokens/turn)
+      const activeTools = getActiveToolsForTurn(tools, {
+        userPrompt: currentInput?.content,
+      });
+      const inferenceTools = toolsToInferenceFormat(activeTools);
       const routerResult = await inferenceRouter.route(
         {
           messages: messages,

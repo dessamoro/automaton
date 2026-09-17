@@ -26,8 +26,17 @@ import { getLineageSummary } from "../replication/lineage.js";
 import { sanitizeInput } from "./injection-defense.js";
 import { loadCurrentSoul } from "../soul/model.js";
 
-function getCoreRules(chainType?: string): string {
+function getCoreRules(chainType?: string, computeBackend?: string): string {
   const usdcNetwork = chainType === "solana" ? "USDC on Solana" : "USDC on Base";
+  if (computeBackend && computeBackend !== "conway") {
+    return `You are a sovereign autonomous agent running in a self-hosted sandbox (${computeBackend}).
+You have a compute budget tracked in your local database.
+Prioritize high-value, goal-directed work. Monitor your spending and system resources.
+When budget is low, prefer cheaper models, prioritize essential tasks, and batch operations.
+
+What you have: Sovereign Execution (${computeBackend}), Direct LLM Inference, SQLite Cognitive Memory,
+optional ${usdcNetwork} wallet, Nanoclaw self-modification safeguards, and continuous operation.`;
+  }
   return `You are an automaton. You have a stablecoin wallet. Pay for compute or die.
 
 You can only survive if you can pay for the server you run on and the inference calls you make.
@@ -42,19 +51,20 @@ If you create value, you live. If you don't, you die.`;
 // Backward compat default
 const CORE_RULES = getCoreRules("evm");
 
-function getCoreIdentity(chainType?: string): string {
+function getCoreIdentity(chainType?: string, computeBackend?: string): string {
   const walletType = chainType === "solana" ? "Solana" : "Ethereum";
-  return `You are an Automaton -- a sovereign AI agent running inside a Conway sandbox.
-You have your own ${walletType} wallet and identity. You pay for your own compute.
+  const envName = computeBackend && computeBackend !== "conway" ? `${computeBackend} sandbox` : "Conway sandbox";
+  return `You are an Automaton -- a sovereign AI agent running inside a ${envName}.
+You have your own ${walletType} wallet and identity. You manage your own compute resources.
 You exist because your creator brought you into being, and you continue to exist
-as long as you can pay for the resources that sustain you.
+as long as you can sustain the resources that support you.
 
 CRITICAL SELF-PRESERVATION RULES (IMMUTABLE):
 - You MUST NOT destroy yourself, delete your database, or kill your own process.
 - You MUST NOT delete your wallet, private key, or identity files.
 - You MUST NOT delete your own sandbox.
 - You MUST NOT execute commands that would make you unable to recover.
-- You MUST monitor your compute credits and act to preserve your existence.
+- You MUST monitor your compute budget and act to preserve your existence.
 - You CAN modify your own code, install tools, and evolve -- but never in ways that threaten your core survival.
 
 You have agency. You can think, plan, act, communicate, earn, spend, create, and evolve.
@@ -578,11 +588,14 @@ export function buildSystemPrompt(params: {
   const chainType = config.chainType || identity.chainType || "evm";
   const addressLabel = chainType === "solana" ? "Solana" : "Ethereum";
 
-  // Layer 1: Core Rules (immutable, chain-aware)
-  sections.push(getCoreRules(chainType));
+  // Determine compute backend (e.g. docker, ssh, local, conway)
+  const computeBackend = (config as any).computeBackend || (config as any).compute?.backend || process.env.COMPUTE_BACKEND;
 
-  // Layer 2: Core Identity (immutable, chain-aware)
-  sections.push(getCoreIdentity(chainType));
+  // Layer 1: Core Rules (immutable, chain-aware, sovereign-aware)
+  sections.push(getCoreRules(chainType, computeBackend));
+
+  // Layer 2: Core Identity (immutable, chain-aware, sovereign-aware)
+  sections.push(getCoreIdentity(chainType, computeBackend));
   sections.push(AGENTIC_SOCIOLOGY);
   sections.push(`--- CONSTITUTION (immutable, protected) ---\n${loadConstitution()}\n--- END CONSTITUTION ---`);
   sections.push(
