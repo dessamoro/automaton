@@ -199,8 +199,16 @@ async function run(): Promise<void> {
   // Load wallet (chain-aware)
   const { account, chainIdentity, chainType: walletChainType } = await getWallet();
   const resolvedChainType = config.chainType || walletChainType || "evm";
-  const apiKey = config.conwayApiKey || loadApiKeyFromConfig();
-  if (!apiKey) {
+  // Determine compute backend (defaulting to local or conway based on API key)
+  const computeBackend = (
+    process.env.COMPUTE_BACKEND ||
+    (config as any).compute?.backend ||
+    (config as any).computeBackend ||
+    (config.conwayApiKey && config.conwayApiUrl ? "conway" : "local")
+  ) as "docker" | "ssh" | "local" | "conway";
+
+  const apiKey = config.conwayApiKey || loadApiKeyFromConfig() || (computeBackend !== "conway" ? "sovereign-local-key" : "");
+  if (!apiKey && computeBackend === "conway") {
     logger.error("No API key found. Run: automaton --provision");
     process.exit(1);
   }
@@ -240,14 +248,6 @@ async function run(): Promise<void> {
   if (!storedAutomatonId) {
     db.setIdentity("automatonId", automatonId);
   }
-
-  // Determine compute backend (defaulting to local or conway based on API key)
-  const computeBackend = (
-    process.env.COMPUTE_BACKEND ||
-    (config as any).compute?.backend ||
-    (config as any).computeBackend ||
-    (config.conwayApiKey && config.conwayApiUrl ? "conway" : "local")
-  ) as "docker" | "ssh" | "local" | "conway";
 
   let conway: ConwayClient;
   if (computeBackend !== "conway") {
