@@ -227,7 +227,7 @@ async function chatViaOpenAiCompatible(params: {
     headers: {
       "Content-Type": "application/json",
       Authorization:
-        params.backend === "openai" || params.backend === "ollama"
+        params.backend === "openai" || params.backend === "ollama" || params.backend === "groq"
           ? `Bearer ${params.apiKey}`
           : params.apiKey,
     },
