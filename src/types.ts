@@ -744,6 +744,8 @@ export interface Skill {
   path: string;
   enabled: boolean;
   installedAt: string;
+  maxTokens?: number;
+  tier?: "core" | "contextual" | "on-demand";
 }
 
 export interface SkillRequirements {
@@ -758,6 +760,8 @@ export interface SkillFrontmatter {
   description: string;
   "auto-activate"?: boolean;
   requires?: SkillRequirements;
+  "max-tokens"?: number;
+  tier?: "core" | "contextual" | "on-demand";
 }
 
 // ─── Git ────────────────────────────────────────────────────────

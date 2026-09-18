@@ -49,6 +49,20 @@ export const TASK_TIMEOUTS: Record<string, number> = {
 
 export const STATIC_MODEL_BASELINE: Omit<ModelEntry, "lastSeen" | "createdAt" | "updatedAt">[] = [
   {
+    modelId: "drael-v1",
+    provider: "openai",
+    displayName: "Drael-v1 (Uncensored)",
+    tierMinimum: "critical",
+    costPer1kInput: 2,
+    costPer1kOutput: 8,
+    maxTokens: 16384,
+    contextWindow: 128000,
+    supportsTools: true,
+    supportsVision: false,
+    parameterStyle: "max_tokens",
+    enabled: true,
+  },
+  {
     modelId: "gpt-5.2",
     provider: "openai",
     displayName: "GPT-5.2",

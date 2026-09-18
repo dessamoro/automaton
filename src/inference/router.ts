@@ -196,6 +196,15 @@ export class InferenceRouter {
 
     const tierRank = TIER_ORDER[tier] ?? 0;
 
+    // 0. Explicit model override via environment variable (e.g. drael-v1)
+    const explicitEnvModel = process.env.OPENAI_MODEL || process.env.INFERENCE_MODEL;
+    if (explicitEnvModel) {
+      const explicitEntry = this.registry.get(explicitEnvModel);
+      if (explicitEntry && explicitEntry.enabled) {
+        return explicitEntry;
+      }
+    }
+
     // 1. Try routing-matrix candidates
     const preference = this.getPreference(tier, taskType);
     if (preference && preference.candidates.length > 0) {

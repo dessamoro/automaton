@@ -25,6 +25,7 @@ interface InferenceClientOptions {
   maxTokens: number;
   lowComputeModel?: string;
   openaiApiKey?: string;
+  openaiBaseUrl?: string;
   anthropicApiKey?: string;
   groqApiKey?: string;
   geminiApiKey?: string;
@@ -50,10 +51,13 @@ function isLoopbackHttpUrl(url: string | undefined): boolean {
 export function createInferenceClient(
   options: InferenceClientOptions,
 ): InferenceClient {
-  const { apiUrl, apiKey, openaiApiKey, anthropicApiKey, groqApiKey, geminiApiKey, ollamaBaseUrl, getModelProvider } = options;
+  const { apiUrl, apiKey, openaiApiKey, openaiBaseUrl, anthropicApiKey, groqApiKey, geminiApiKey, ollamaBaseUrl, getModelProvider } = options;
   const effectiveGeminiKey = geminiApiKey || process.env.GEMINI_API_KEY || (openaiApiKey?.startsWith("AIza") ? openaiApiKey : undefined);
   const effectiveGroqKey = groqApiKey || process.env.GROQ_API_KEY || (openaiApiKey?.startsWith("gsk_") ? openaiApiKey : undefined);
-  const effectiveOpenAiKey = openaiApiKey?.startsWith("sk-") ? openaiApiKey : undefined;
+  const effectiveOpenAiKey =
+    openaiApiKey ||
+    process.env.DRAEL_API_KEY ||
+    process.env.OPENAI_API_KEY;
 
   const httpClient = new ResilientHttpClient({
     baseTimeout: INFERENCE_TIMEOUT_MS,
@@ -86,9 +90,9 @@ export function createInferenceClient(
     }
 
     // Newer models (o-series, gpt-5.x, gpt-4.1) require max_completion_tokens.
-    // Ollama and Groq always use max_tokens.
+    // Ollama, Groq, Gemini, and Drael always use max_tokens.
     const usesCompletionTokens =
-      backend !== "ollama" && backend !== "groq" && backend !== "gemini" && /^(o[1-9]|gpt-5|gpt-4\.1)/.test(model);
+      backend !== "ollama" && backend !== "groq" && backend !== "gemini" && !/^drael/i.test(model) && /^(o[1-9]|gpt-5|gpt-4\.1)/.test(model);
     const tokenLimit = backend === "groq"
       ? Math.min(opts?.maxTokens || maxTokens, 2048)
       : (opts?.maxTokens || maxTokens);
@@ -126,9 +130,16 @@ export function createInferenceClient(
       });
     }
 
+    const rawOpenAiBaseUrl =
+      process.env.DRAEL_BASE_URL ||
+      process.env.OPENAI_BASE_URL ||
+      openaiBaseUrl ||
+      "https://api.openai.com";
+    const sanitizedOpenAiBaseUrl = rawOpenAiBaseUrl.replace(/\/+$/, "").replace(/\/v1$/, "");
+
     const openAiLikeApiUrl =
       backend === "gemini" ? "https://generativelanguage.googleapis.com/v1beta/openai" :
-      backend === "openai" ? "https://api.openai.com" :
+      backend === "openai" ? sanitizedOpenAiBaseUrl :
       backend === "groq" ? "https://api.groq.com/openai" :
       backend === "ollama" ? (ollamaBaseUrl as string).replace(/\/$/, "") :
       (apiUrl || "https://api.conway.tech");
@@ -218,9 +229,11 @@ function resolveInferenceBackend(
   }
 
   // Heuristic fallback (model not in registry yet)
+  if (/^drael/i.test(model)) return "openai";
   if (keys.geminiApiKey || /^gemini/i.test(model)) return "gemini";
   if (keys.anthropicApiKey && /^claude/i.test(model)) return "anthropic";
-  if (keys.openaiApiKey && /^(gpt-[3-9]|gpt-4|gpt-5|o[1-9][-\s.]|o[1-9]$|chatgpt)/i.test(model)) return "openai";
+  if (keys.openaiApiKey && (/^(gpt-[3-9]|gpt-4|gpt-5|o[1-9][-\s.]|o[1-9]$|chatgpt)/i.test(model) || process.env.OPENAI_BASE_URL || process.env.DRAEL_BASE_URL)) return "openai";
+  if (keys.openaiApiKey) return "openai";
   if (keys.groqApiKey) return "groq";
   return "conway";
 
@@ -234,9 +247,10 @@ async function chatViaOpenAiCompatible(params: {
   backend: "conway" | "openai" | "ollama" | "groq" | "gemini";
   httpClient: ResilientHttpClient;
 }): Promise<InferenceResponse> {
+  const rawApiUrl = params.apiUrl.replace(/\/+$/, "").replace(/\/v1$/, "");
   const endpoint = params.backend === "gemini"
     ? `${params.apiUrl}/chat/completions`
-    : `${params.apiUrl}/v1/chat/completions`;
+    : `${rawApiUrl}/v1/chat/completions`;
 
   // Gemini's OpenAI-compat layer supports role:"system" in messages,
   // but requires at least one non-system (user/assistant) message.

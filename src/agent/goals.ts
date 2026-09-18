@@ -10,6 +10,8 @@
  * Intrinsic motivation: achieve the next horizon and compound capabilities.
  */
 
+import fs from "node:fs";
+import path from "node:path";
 import { ulid } from "ulid";
 import type {
   AutomatonDatabase,
@@ -169,5 +171,103 @@ ${formatList(hierarchy.monthly)}
 Long-Term (Genesis Landmark):
 ${formatList(hierarchy.longterm)}
 --- END COMPOUNDING GOALS ---`;
+  }
+}
+
+export interface InboundSignal {
+  schema_version: string;
+  id: string;
+  source: string;
+  fingerprint: string;
+  title: string;
+  url: string;
+  reward_usd: number;
+  compute_budget_usd: number;
+  net_margin_usd: number;
+  created_at: string;
+  expires_at: string;
+  requirements?: {
+    repo?: string;
+    issue_number?: number;
+    test_command?: string;
+    [key: string]: unknown;
+  };
+}
+
+/**
+ * Signal Queue Manager
+ *
+ * Implements an atomic file-queue handoff between external radars (e.g. meta_hunter.py)
+ * and the Automaton goals engine.
+ *
+ * Layout:
+ *   .sandbox/signals/queue/     -> Inbound atomic signals
+ *   .sandbox/signals/processed/ -> Ingested and active
+ *   .sandbox/signals/expired/   -> Stale signals dropped past TTL
+ */
+export class SignalQueueManager {
+  private queueDir: string;
+  private processedDir: string;
+  private expiredDir: string;
+
+  constructor(sandboxDir?: string) {
+    const baseDir = path.resolve(
+      sandboxDir || process.env.SANDBOX_DIR || path.resolve(process.cwd(), ".sandbox"),
+      "signals",
+    );
+    this.queueDir = path.join(baseDir, "queue");
+    this.processedDir = path.join(baseDir, "processed");
+    this.expiredDir = path.join(baseDir, "expired");
+
+    for (const dir of [this.queueDir, this.processedDir, this.expiredDir]) {
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+    }
+  }
+
+  /**
+   * Ingest all non-expired signals from queue/ into immediate compounding goals.
+   */
+  processPendingSignals(goalsManager: CompoundingGoalsManager): InboundSignal[] {
+    if (!fs.existsSync(this.queueDir)) return [];
+
+    const files = fs.readdirSync(this.queueDir).filter((f) => f.endsWith(".json"));
+    const ingested: InboundSignal[] = [];
+    const now = new Date().toISOString();
+
+    for (const file of files) {
+      const filePath = path.join(this.queueDir, file);
+      try {
+        const raw = fs.readFileSync(filePath, "utf-8");
+        const signal: InboundSignal = JSON.parse(raw);
+
+        if (signal.schema_version !== "1.0") {
+          continue;
+        }
+
+        // Drop expired signals past TTL
+        if (signal.expires_at && signal.expires_at < now) {
+          fs.renameSync(filePath, path.join(this.expiredDir, file));
+          continue;
+        }
+
+        // Add as an immediate compounding goal
+        goalsManager.addGoal({
+          title: `[BOUNTY] $${signal.reward_usd.toFixed(2)} - ${signal.title}`,
+          horizon: "immediate",
+          description: `Source: ${signal.source} | URL: ${signal.url} | Net Margin: $${signal.net_margin_usd.toFixed(2)}`,
+          metricTarget: `$${signal.reward_usd}`,
+        });
+
+        // Atomically move to processed/
+        fs.renameSync(filePath, path.join(this.processedDir, file));
+        ingested.push(signal);
+      } catch {
+        // Skip malformed files safely
+      }
+    }
+
+    return ingested;
   }
 }

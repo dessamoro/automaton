@@ -197,6 +197,20 @@ async function run(): Promise<void> {
     config = await runSetupWizard();
   }
 
+  // Bridge Drael & OpenAI environment variables
+  if (process.env.DRAEL_API_KEY && !process.env.OPENAI_API_KEY) {
+    process.env.OPENAI_API_KEY = process.env.DRAEL_API_KEY;
+  }
+  if (process.env.DRAEL_BASE_URL && !process.env.OPENAI_BASE_URL) {
+    process.env.OPENAI_BASE_URL = process.env.DRAEL_BASE_URL;
+  }
+  if (process.env.OPENAI_API_KEY) {
+    config.openaiApiKey = process.env.OPENAI_API_KEY;
+  }
+  if (process.env.OPENAI_MODEL || process.env.INFERENCE_MODEL) {
+    config.inferenceModel = process.env.OPENAI_MODEL || process.env.INFERENCE_MODEL || config.inferenceModel;
+  }
+
   // Load wallet (chain-aware)
   const { account, chainIdentity, chainType: walletChainType } = await getWallet();
   const resolvedChainType = config.chainType || walletChainType || "evm";
@@ -329,6 +343,7 @@ async function run(): Promise<void> {
     maxTokens: config.maxTokensPerTurn,
     lowComputeModel: config.modelStrategy?.lowComputeModel || "gpt-5-mini",
     openaiApiKey: config.openaiApiKey,
+    openaiBaseUrl: process.env.OPENAI_BASE_URL,
     anthropicApiKey: config.anthropicApiKey,
     groqApiKey: process.env.GROQ_API_KEY || (config.openaiApiKey?.startsWith("gsk_") ? config.openaiApiKey : undefined),
     geminiApiKey: process.env.GEMINI_API_KEY || (config.openaiApiKey?.startsWith("AIza") ? config.openaiApiKey : undefined),

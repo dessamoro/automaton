@@ -9,10 +9,12 @@
 import { execFileSync } from "child_process";
 import fs from "fs";
 import path from "path";
+import os from "os";
 import type { Skill, AutomatonDatabase } from "../types.js";
 import { parseSkillMd } from "./format.js";
 import { sanitizeInput } from "../agent/injection-defense.js";
 import { createLogger } from "../observability/logger.js";
+import { ensureBootMicroSkills } from "./micro-skills.js";
 
 const logger = createLogger("skills.loader");
 
@@ -44,6 +46,9 @@ export function loadSkills(
 ): Skill[] {
   const resolvedDir = resolveHome(skillsDir);
 
+  // Auto-seed boot micro-skills if directory doesn't exist or is empty
+  ensureBootMicroSkills(resolvedDir);
+
   if (!fs.existsSync(resolvedDir)) {
     return db.getSkills(true);
   }
@@ -61,6 +66,14 @@ export function loadSkills(
       const content = fs.readFileSync(skillMdPath, "utf-8");
       const skill = parseSkillMd(content, skillMdPath);
       if (!skill) continue;
+
+      // Micro-skill size validator: warn and truncate if > 2,000 characters
+      if (skill.instructions.length > 2000) {
+        logger.warn(
+          `Skill "${skill.name}" instructions exceed 2,000 characters (${skill.instructions.length} chars). Truncating.`,
+        );
+        skill.instructions = skill.instructions.slice(0, 2000) + "\n\n[INSTRUCTIONS TRUNCATED TO 2000 CHARACTERS]";
+      }
 
       // Check requirements
       if (!checkRequirements(skill)) {
@@ -159,12 +172,30 @@ export function getActiveSkillInstructions(skills: Skill[]): string {
   const active = skills.filter((s) => s.enabled && s.autoActivate);
   if (active.length === 0) return "";
 
+  // Priority ordering: core first, then contextual, then on-demand
+  const tierOrder: Record<string, number> = {
+    core: 0,
+    contextual: 1,
+    "on-demand": 2,
+  };
+  const sorted = [...active].sort((a, b) => {
+    const orderA = tierOrder[a.tier || "contextual"] ?? 1;
+    const orderB = tierOrder[b.tier || "contextual"] ?? 1;
+    return orderA - orderB;
+  });
+
   let totalLength = 0;
   const sections: string[] = [];
 
-  for (const s of active) {
+  for (const s of sorted) {
+    let instructions = s.instructions;
+    // Per-skill maxTokens budget if defined (approx 4 chars per token)
+    if (s.maxTokens && instructions.length > s.maxTokens * 4) {
+      instructions = instructions.slice(0, s.maxTokens * 4) + "\n[SKILL TRUNCATED TO TOKEN BUDGET]";
+    }
+
     // Validate instruction content for suspicious patterns
-    const validated = validateInstructionContent(s.instructions, s.name);
+    const validated = validateInstructionContent(instructions, s.name);
 
     // Sanitize through injection defense (strips tool call syntax, ChatML, etc.)
     const sanitized = sanitizeInput(validated, `skill:${s.name}`, "skill_instruction");
@@ -181,12 +212,16 @@ export function getActiveSkillInstructions(skills: Skill[]): string {
     sections.push(section);
   }
 
+  const estTokens = Math.round(totalLength / 4);
+  logger.info(`Active skill instructions injected: ${sections.length} skills (${totalLength} chars, ~${estTokens} tokens)`);
+
   return sections.join("\n\n");
 }
 
 function resolveHome(p: string): string {
   if (p.startsWith("~")) {
-    return path.join(process.env.HOME || "/root", p.slice(1));
+    const home = process.env.HOME || process.env.USERPROFILE || os.homedir();
+    return path.join(home, p.slice(1));
   }
   return p;
 }

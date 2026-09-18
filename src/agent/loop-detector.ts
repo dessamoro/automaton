@@ -19,6 +19,7 @@ export class LoopDetector {
   private patternWarningIssued: string | null = null;
   private consecutiveIdleOnlyTurns = 0;
   private currentTurnIsIdleOnly = true;
+  private totalLoopsDetected = 0;
 
   constructor(config?: Partial<LoopDetectorConfig>) {
     this.config = {
@@ -49,12 +50,26 @@ export class LoopDetector {
         (call) => call.name === name && call.argsHash === argsHash,
       );
       if (allIdentical) {
+        this.totalLoopsDetected++;
+        let hint = "";
+        if (name === "write_file" || name === "exec") {
+          if (args.includes("/root") || args.includes("/etc") || args.includes("permission") || args.includes("EACCES")) {
+            hint = " This appears to be a permission error. You run as 'codespace', not 'root'. Use relative paths (e.g. 'server.py') or paths under .sandbox/. Check with exec({command: 'pwd'}) and exec({command: 'whoami'}).";
+          }
+        }
+        let escalation = "";
+        if (this.totalLoopsDetected >= 3) {
+          escalation = " You have encountered multiple loops. Call ask_oracle to get operator assistance rather than continuing to fail.";
+        } else {
+          escalation = " If stuck, call ask_oracle for help.";
+        }
+
         return {
           blocked: true,
           reason:
             `You have called "${name}" with identical arguments ${threshold} times in a row. ` +
-            "This is a loop. You MUST try a different approach, use a different tool, " +
-            "or call task_done to report that you cannot complete this task.",
+            `This is a loop. You MUST try a different approach, use a different tool, ` +
+            `or call task_done to report that you cannot complete this task.${hint}${escalation}`,
         };
       }
     }
@@ -134,6 +149,7 @@ export class LoopDetector {
     this.patternWarningIssued = null;
     this.consecutiveIdleOnlyTurns = 0;
     this.currentTurnIsIdleOnly = true;
+    this.totalLoopsDetected = 0;
   }
 }
 

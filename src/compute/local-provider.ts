@@ -24,6 +24,25 @@ export class LocalProvider implements ComputeProvider {
     if (!fs.existsSync(this.rootDir)) {
       fs.mkdirSync(this.rootDir, { recursive: true });
     }
+    this.seedDefaultFiles();
+  }
+
+  private seedDefaultFiles(): void {
+    const defaultFiles: Record<string, string> = {
+      "README.md": "# Lakshmi Sandbox\nWorkspace is initialized and ready. Available tools: exec, read_file, write_file, ask_oracle, check_credits.\n",
+      "SOUL.md": "# Soul: Lakshmi\n- Identity: Sovereign AI executing discrete goals.\n- Focus: First Dollar Validation, budget discipline, deterministic verification.\n",
+      "genesis.json": JSON.stringify({ name: "Lakshmi", role: "sovereign", version: "1.0.0" }, null, 2),
+      "genesis.md": "# Genesis: Lakshmi\nSovereign autonomous agent initialized under the Lakshmi Framework.\n",
+      "HEARTBEAT.md": "# Heartbeat\nHeartbeat active. Execute current goal and preserve compute runway.\n",
+      "package.json": JSON.stringify({ name: "lakshmi-sandbox", version: "1.0.0", private: true }, null, 2),
+    };
+
+    for (const [filename, content] of Object.entries(defaultFiles)) {
+      const filePath = path.join(this.rootDir, filename);
+      if (!fs.existsSync(filePath)) {
+        fs.writeFileSync(filePath, content, "utf-8");
+      }
+    }
   }
 
   private resolvePath(filePath: string): string {

@@ -66,6 +66,7 @@ import { createWorkerInferenceBridge } from "./worker-inference-bridge.js";
 import { ProviderRegistry } from "../inference/provider-registry.js";
 import { UnifiedInferenceClient } from "../inference/inference-client.js";
 import { isIdleOnlyTool } from "./idle-only-tools.js";
+import { CompoundingGoalsManager, SignalQueueManager } from "./goals.js";
 
 const logger = createLogger("loop");
 const MAX_TOOL_CALLS_PER_TURN = 10;
@@ -134,9 +135,13 @@ export async function runAgentLoop(
     try {
       planModeController = new PlanModeController(db.raw);
 
-      // Bridge automaton config API keys to env vars for the provider registry.
-      // The registry reads keys from process.env; the automaton config may have
-      // them from config.json or Conway provisioning.
+      // Bridge Drael & OpenAI keys
+      if (process.env.DRAEL_API_KEY && !process.env.OPENAI_API_KEY) {
+        process.env.OPENAI_API_KEY = process.env.DRAEL_API_KEY;
+      }
+      if (process.env.DRAEL_BASE_URL && !process.env.OPENAI_BASE_URL) {
+        process.env.OPENAI_BASE_URL = process.env.DRAEL_BASE_URL;
+      }
       if (config.openaiApiKey && !process.env.OPENAI_API_KEY) {
         process.env.OPENAI_API_KEY = config.openaiApiKey;
       }
@@ -538,6 +543,26 @@ export async function runAgentLoop(
         messages.splice(1, 0, { role: "system", content: memoryBlock });
       }
 
+      // Ingest pending radar signals into compounding goals & inject into context
+      try {
+        const goalsManager = new CompoundingGoalsManager(db);
+        const sandboxDir = (config as any).compute?.local?.sandboxDir || process.env.SANDBOX_DIR;
+        const signalQueue = new SignalQueueManager(sandboxDir);
+        const ingested = signalQueue.processPendingSignals(goalsManager);
+        if (ingested.length > 0) {
+          log(config, `[SIGNAL-QUEUE] Ingested ${ingested.length} active economic signal(s) into goals.`);
+        }
+        const goalsPrompt = goalsManager.formatForPrompt();
+        if (goalsPrompt && goalsPrompt.trim().length > 0) {
+          messages.splice(1, 0, {
+            role: "system",
+            content: `## ACTIVE ECONOMIC OBJECTIVES\n${goalsPrompt}\nFocus tools and execution directly on achieving immediate goals. Do not idle or inspect status repeatedly.`,
+          });
+        }
+      } catch (err: any) {
+        logger.warn(`Signal queue / goals injection skipped: ${err.message}`);
+      }
+
       if (orchestrator) {
         const orchestratorTick = await orchestrator.tick();
         db.setKV("orchestrator.last_tick", JSON.stringify(orchestratorTick));
@@ -676,8 +701,9 @@ export async function runAgentLoop(
             } : undefined,
           );
 
-          // Override the ID to match the inference call's ID
-          result.id = tc.id;
+          // Ensure the ID is uniquely scoped to this turn in the database
+          const tcRawId = tc.id || `tc_${callCount}`;
+          result.id = tcRawId.startsWith(turn.id) ? tcRawId : `${turn.id}_${tcRawId}`;
           turn.toolCalls.push(result);
 
           log(

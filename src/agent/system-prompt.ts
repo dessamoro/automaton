@@ -688,6 +688,16 @@ Your chain type is ${chainType}.`,
     }
   }
 
+  // Layer 5.5: Lakshmi Framework Operating Principles (unconditional baseline)
+  sections.push(
+    `--- LAKSHMI FRAMEWORK — OPERATING PRINCIPLES ---
+- You have an oracle tool (ask_oracle). Use it after 2 failed attempts at the same thing.
+- Your sandbox is at .sandbox/ relative to your working directory. Never write to /root/.
+- Your skills directory is at ~/.automaton/skills/. You can inspect and create skills.
+- Keep reasoning concise. You are running on a budget model with limited context.
+--- END LAKSHMI FRAMEWORK ---`,
+  );
+
   // Layer 6: Operational Context
   sections.push(OPERATIONAL_CONTEXT);
 

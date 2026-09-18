@@ -59,6 +59,8 @@ export function parseSkillMd(
     path: filePath,
     enabled: true,
     installedAt: new Date().toISOString(),
+    maxTokens: frontmatter["max-tokens"] ? Number(frontmatter["max-tokens"]) : undefined,
+    tier: frontmatter.tier || "contextual",
   };
 }
 
@@ -143,6 +145,8 @@ function parseYamlFrontmatter(raw: string): SkillFrontmatter | null {
         result[key] = true;
       } else if (value === "false") {
         result[key] = false;
+      } else if (/^\d+$/.test(value)) {
+        result[key] = parseInt(value, 10);
       } else {
         result[key] = value.replace(/^["']|["']$/g, "");
       }

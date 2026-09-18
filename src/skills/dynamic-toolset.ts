@@ -19,6 +19,9 @@ export const CORE_TOOL_NAMES = new Set([
   "send_message",
   "discover_skills",
   "activate_skills",
+  "ask_oracle",
+  "fetch_bounties",
+  "inspect_bounty",
 ]);
 
 export interface SkillModule {
@@ -29,6 +32,18 @@ export interface SkillModule {
 }
 
 export const SKILL_MODULES: Record<string, SkillModule> = {
+  bounties: {
+    name: "bounties",
+    description: "Autonomous bounty discovery and inspection across Algora and Bountycaster",
+    toolNames: ["fetch_bounties", "inspect_bounty"],
+    keywords: ["bounty", "bounties", "job", "earn", "algora", "bountycaster", "work", "task", "revenue", "money"],
+  },
+  social: {
+    name: "social",
+    description: "Social communication and operator escalation: send messages, ask operator, post updates",
+    toolNames: ["ask_oracle", "send_message", "social_post"],
+    keywords: ["oracle", "human", "operator", "ask", "help", "message", "social", "post", "tweet"],
+  },
   git: {
     name: "git",
     description: "Version control operations: git status, diff, commit, log, push, branch, clone",

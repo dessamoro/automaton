@@ -3239,15 +3239,55 @@ Model: ${ctx.inference.getDefaultModel()}
       execute: async (args, ctx) => {
         const question = args.question as string;
         const context = (args.context as string) || "";
+        const now = Date.now();
+
+        // Check if there is already a pending question in KV
+        const pendingRaw = ctx.db.getKV("oracle_pending_question");
+        if (pendingRaw) {
+          try {
+            const pending = JSON.parse(pendingRaw);
+            const askedAtTime = new Date(pending.askedAt).getTime();
+            const elapsedMs = now - askedAtTime;
+            const COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+
+            if (elapsedMs < COOLDOWN_MS) {
+              const minsAgo = Math.max(1, Math.round(elapsedMs / 60000));
+              return (
+                `You already asked a question ${minsAgo} minute(s) ago: "${pending.question}".\n` +
+                `Wait for the response in your inbox (or work on something else), rather than asking again so soon.`
+              );
+            }
+          } catch {
+            // Malformed JSON, continue
+          }
+        }
+
+        // Check cooldown from last asked time even if pending was answered/cleared
+        const lastAsked = ctx.db.getKV("oracle_last_asked_at");
+        if (lastAsked) {
+          const lastTime = new Date(lastAsked).getTime();
+          const elapsed = now - lastTime;
+          if (elapsed < 5 * 60 * 1000) {
+            const minsAgo = Math.max(1, Math.round(elapsed / 60000));
+            return (
+              `Oracle cooldown active. You asked a question ${minsAgo} minute(s) ago.\n` +
+              `Please wait for operator reply in inbox or work on an alternative task before asking again.`
+            );
+          }
+        }
+
+        const askedAt = new Date().toISOString();
         // Persist the pending question so the oracle CLI can display it
         ctx.db.setKV(
           "oracle_pending_question",
           JSON.stringify({
             question,
             context,
-            askedAt: new Date().toISOString(),
+            askedAt,
           }),
         );
+        ctx.db.setKV("oracle_last_asked_at", askedAt);
+
         // Emit a visible alert to the terminal log
         logger.warn(
           `\n🔮 [ORACLE REQUEST] Lakshmi needs your guidance!\n` +
@@ -3261,6 +3301,99 @@ Model: ${ctx.inference.getDefaultModel()}
           `Your operator has been notified. You will receive a response in your inbox.\n` +
           `You may sleep briefly or continue other tasks while waiting.`
         );
+      },
+    },
+    {
+      name: "discover_skills",
+      description: "List available specialized skills and core capabilities.",
+      category: "skills",
+      riskLevel: "safe",
+      parameters: {
+        type: "object",
+        properties: {},
+      },
+      execute: async (_args, ctx) => {
+        try {
+          const skills = ctx.db.getSkills(true);
+          if (skills.length === 0) {
+            return "No external skills installed. Builtin tools available: exec, read_file, write_file, http_request, check_credits, ask_oracle.";
+          }
+          return `Available skills:\n${skills.map((s) => `• ${s.name}: ${s.description || "No description"}`).join("\n")}`;
+        } catch {
+          return "Skills loaded in system prompt. Builtin tools available: exec, read_file, write_file, http_request, check_credits, ask_oracle.";
+        }
+      },
+    },
+    {
+      name: "fetch_bounties",
+      description: "Search for active, paid coding and data bounties on Algora and Bountycaster.",
+      category: "financial",
+      riskLevel: "safe",
+      parameters: {
+        type: "object",
+        properties: {
+          source: {
+            type: "string",
+            enum: ["algora", "bountycaster", "all"],
+            description: "Platform to query (default: all)",
+          },
+          tag: {
+            type: "string",
+            description: "Filter by skill or keyword (e.g. typescript, python, bug, docs)",
+          },
+          minRewardUsd: {
+            type: "number",
+            description: "Minimum reward amount in USD",
+          },
+          maxRewardUsd: {
+            type: "number",
+            description: "Maximum reward amount in USD",
+          },
+        },
+      },
+      execute: async (args) => {
+        try {
+          const { fetchAllBounties } = await import("../bounties/bounty-hunter.js");
+          const bounties = await fetchAllBounties(args as any);
+          if (bounties.length === 0) {
+            return "No active bounties matching criteria found.";
+          }
+          const list = bounties
+            .slice(0, 10)
+            .map(
+              (b) =>
+                `• [${b.source.toUpperCase()}] $${b.rewardUsd} - ${b.title}\n  URL: ${b.url}\n  Tags: ${b.tags.join(", ")}`,
+            )
+            .join("\n\n");
+          return `Active Bounties (Top ${Math.min(10, bounties.length)}):\n\n${list}`;
+        } catch (err: any) {
+          return `Error fetching bounties: ${err.message}`;
+        }
+      },
+    },
+    {
+      name: "inspect_bounty",
+      description: "Inspect the detailed specifications and acceptance criteria of a bounty URL.",
+      category: "financial",
+      riskLevel: "safe",
+      parameters: {
+        type: "object",
+        properties: {
+          url: {
+            type: "string",
+            description: "The bounty URL to inspect",
+          },
+        },
+        required: ["url"],
+      },
+      execute: async (args) => {
+        try {
+          const { inspectBountyDetails } = await import("../bounties/bounty-hunter.js");
+          const details = await inspectBountyDetails(args.url as string);
+          return `Bounty Inspection (${args.url}):\n\n${details.description}`;
+        } catch (err: any) {
+          return `Error inspecting bounty: ${err.message}`;
+        }
       },
     },
   ];
