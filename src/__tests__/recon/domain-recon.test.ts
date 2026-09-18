@@ -93,4 +93,64 @@ describe("Domain & Infrastructure OSINT Engine", () => {
     expect(report.subdomains).toContain("auth.example.com");
     expect(report.securityScore).toBeGreaterThanOrEqual(90);
   });
+
+  it("extracts hosting intel from urlscan.io search results", async () => {
+    const mockUrlscanResponse = {
+      results: [
+        {
+          page: {
+            asn: "AS13335",
+            asnname: "CLOUDFLARENET",
+            country: "US",
+            server: "cloudflare",
+          },
+          screenshot: "https://urlscan.io/screenshots/test.png",
+        },
+      ],
+    };
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+      ok: true,
+      json: async () => mockUrlscanResponse,
+    } as any);
+
+    const { queryUrlscan } = await import("../../recon/domain-recon.js");
+    const hosting = await queryUrlscan("example.com");
+    expect(hosting).toBeDefined();
+    expect(hosting?.server).toBe("cloudflare");
+    expect(hosting?.asn).toBe("AS13335 CLOUDFLARENET");
+    expect(hosting?.country).toBe("US");
+  });
+
+  it("extracts registration and abuse contact from OpenRDAP", async () => {
+    const mockRdapResponse = {
+      events: [
+        { eventAction: "registration", eventDate: "2020-01-01T00:00:00Z" },
+        { eventAction: "expiration", eventDate: "2030-01-01T00:00:00Z" },
+      ],
+      entities: [
+        {
+          roles: ["abuse"],
+          vcardArray: ["vcard", [["email", {}, "text", "abuse@example.com"]]],
+        },
+        {
+          roles: ["registrar"],
+          handle: "REG-123",
+          vcardArray: ["vcard", [["fn", {}, "text", "Example Registrar LLC"]]],
+        },
+      ],
+    };
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+      ok: true,
+      json: async () => mockRdapResponse,
+    } as any);
+
+    const { queryRdap } = await import("../../recon/domain-recon.js");
+    const reg = await queryRdap("example.com");
+    expect(reg).toBeDefined();
+    expect(reg?.registrar).toBe("Example Registrar LLC");
+    expect(reg?.abuseEmail).toBe("abuse@example.com");
+    expect(reg?.createdAt).toBe("2020-01-01T00:00:00Z");
+  });
 });

@@ -1,10 +1,12 @@
 /**
  * Domain & Infrastructure OSINT Engine
  *
- * Inspired by MaxIntel methodologies:
+ * Inspired by MaxIntel methodologies & Reddit r/cybersecurity top tools:
  * 1. DNS-over-HTTPS (DoH) queries (A, AAAA, MX, TXT) via public DoH (Google/Cloudflare).
  * 2. Certificate Transparency log scanning via crt.sh for passive subdomain enumeration.
  * 3. Email security hygiene evaluation (SPF and DMARC validation).
+ * 4. urlscan.io public passive search API for hosting, ASN, server headers, and screenshots.
+ * 5. OpenRDAP for authoritative domain registration and abuse contact discovery.
  *
  * Operates with zero third-party API keys and zero OS-level socket dependencies.
  */
@@ -20,6 +22,20 @@ export interface DnsRecord {
   TTL?: number;
 }
 
+export interface HostingIntel {
+  asn?: string;
+  country?: string;
+  server?: string;
+  screenshotUrl?: string;
+}
+
+export interface RegistrationIntel {
+  registrar?: string;
+  abuseEmail?: string;
+  createdAt?: string;
+  expiresAt?: string;
+}
+
 export interface DomainReconReport {
   domain: string;
   queriedAt: string;
@@ -28,6 +44,8 @@ export interface DomainReconReport {
   spfConfigured: boolean;
   dmarcConfigured: boolean;
   subdomains: string[];
+  hosting?: HostingIntel;
+  registration?: RegistrationIntel;
   securityScore: number; // 0 to 100
   securityNotes: string[];
 }
@@ -103,19 +121,115 @@ export async function queryCertificateTransparency(domain: string): Promise<stri
 }
 
 /**
+ * Query urlscan.io public search API for passive hosting & tech stack intel
+ */
+export async function queryUrlscan(domain: string): Promise<HostingIntel | undefined> {
+  try {
+    const cleanDomain = domain.toLowerCase().replace(/^(https?:\/\/)?(www\.)?/, "").split("/")[0];
+    const url = `https://urlscan.io/api/v1/search/?q=domain:${encodeURIComponent(cleanDomain)}&size=1`;
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: { Accept: "application/json", "User-Agent": "Lakshmi-OSINT/1.0" },
+    });
+    clearTimeout(timeout);
+
+    if (!res.ok) return undefined;
+    const json = await res.json() as any;
+    if (!json.results || !json.results.length) return undefined;
+
+    const first = json.results[0];
+    const page = first.page || {};
+
+    return {
+      asn: page.asnname ? `${page.asn || ""} ${page.asnname}`.trim() : page.asn,
+      country: page.country,
+      server: page.server,
+      screenshotUrl: first.screenshot,
+    };
+  } catch (err: any) {
+    logger.debug(`urlscan.io query failed for ${domain}: ${err.message}`);
+    return undefined;
+  }
+}
+
+/**
+ * Query OpenRDAP for domain registration dates and abuse contact emails
+ */
+export async function queryRdap(domain: string): Promise<RegistrationIntel | undefined> {
+  try {
+    const cleanDomain = domain.toLowerCase().replace(/^(https?:\/\/)?(www\.)?/, "").split("/")[0];
+    const url = `https://rdap.org/domain/${encodeURIComponent(cleanDomain)}`;
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: { Accept: "application/rdap+json", "User-Agent": "Lakshmi-OSINT/1.0" },
+    });
+    clearTimeout(timeout);
+
+    if (!res.ok) return undefined;
+    const json = await res.json() as any;
+
+    let registrar: string | undefined;
+    let abuseEmail: string | undefined;
+    let createdAt: string | undefined;
+    let expiresAt: string | undefined;
+
+    // Parse events (registration / expiration)
+    if (Array.isArray(json.events)) {
+      for (const ev of json.events) {
+        if (ev.eventAction === "registration") createdAt = ev.eventDate;
+        if (ev.eventAction === "expiration") expiresAt = ev.eventDate;
+      }
+    }
+
+    // Parse entities for registrar and abuse email
+    if (Array.isArray(json.entities)) {
+      for (const entity of json.entities) {
+        if (Array.isArray(entity.roles) && entity.roles.includes("registrar")) {
+          registrar = entity.vcardArray?.[1]?.find((v: any) => v[0] === "fn")?.[3] || entity.handle;
+        }
+        // Look for abuse contact
+        if (Array.isArray(entity.roles) && entity.roles.includes("abuse")) {
+          abuseEmail = entity.vcardArray?.[1]?.find((v: any) => v[0] === "email")?.[3];
+        }
+      }
+    }
+
+    return {
+      registrar,
+      abuseEmail,
+      createdAt,
+      expiresAt,
+    };
+  } catch (err: any) {
+    logger.debug(`OpenRDAP query failed for ${domain}: ${err.message}`);
+    return undefined;
+  }
+}
+
+/**
  * Complete Domain & Infrastructure Reconnaissance
  */
 export async function performDomainRecon(rawDomain: string): Promise<DomainReconReport> {
   const domain = rawDomain.toLowerCase().replace(/^(https?:\/\/)?(www\.)?/, "").split("/")[0].trim();
   const securityNotes: string[] = [];
 
-  // 1. Parallel DoH queries
-  const [aRecords, mxRecords, txtRecords, dmarcRecords, subdomains] = await Promise.all([
+  // 1. Parallel DoH, crt.sh, urlscan, and RDAP queries
+  const [aRecords, mxRecords, txtRecords, dmarcRecords, subdomains, hosting, registration] = await Promise.all([
     queryDoh(domain, "A"),
     queryDoh(domain, "MX"),
     queryDoh(domain, "TXT"),
     queryDoh(`_dmarc.${domain}`, "TXT"),
     queryCertificateTransparency(domain),
+    queryUrlscan(domain),
+    queryRdap(domain),
   ]);
 
   const ipAddresses = aRecords.map(r => r.data);
@@ -162,6 +276,16 @@ export async function performDomainRecon(rawDomain: string): Promise<DomainRecon
     securityNotes.push(`Discovered ${subdomains.length} public subdomains via Certificate Transparency.`);
   }
 
+  if (hosting?.server) {
+    securityNotes.push(`Web server fingerprint: ${hosting.server}.`);
+  }
+  if (hosting?.asn) {
+    securityNotes.push(`Autonomous system: ${hosting.asn} (${hosting.country || "Global"}).`);
+  }
+  if (registration?.abuseEmail) {
+    securityNotes.push(`Abuse/security disclosure contact identified: ${registration.abuseEmail}.`);
+  }
+
   return {
     domain,
     queriedAt: new Date().toISOString(),
@@ -170,6 +294,8 @@ export async function performDomainRecon(rawDomain: string): Promise<DomainRecon
     spfConfigured,
     dmarcConfigured,
     subdomains: subdomains.slice(0, 50), // Cap top 50 in report
+    hosting,
+    registration,
     securityScore: Math.min(100, Math.max(0, score)),
     securityNotes,
   };
