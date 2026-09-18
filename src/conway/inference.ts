@@ -298,10 +298,10 @@ async function chatViaOpenAiCompatible(params: {
   });
 
   if (!resp.ok) {
-    const text = await resp.text();
+    let errorText = await resp.text();
 
     // 1. If OpenRouter rejected tool use, retry immediately without native tools payload
-    if (text.includes("No endpoints found that support tool use") && requestBody.tools) {
+    if (errorText.includes("No endpoints found that support tool use") && requestBody.tools) {
       const { tools: _t, tool_choice: _tc, ...bodyWithoutTools } = requestBody;
       resp = await params.httpClient.request(endpoint, {
         method: "POST",
@@ -315,11 +315,14 @@ async function chatViaOpenAiCompatible(params: {
         body: JSON.stringify(bodyWithoutTools),
         timeout: INFERENCE_TIMEOUT_MS,
       });
-    } else if (resp.status === 429) {
-      // 2. Upstream provider rate-limit or overload
+      if (!resp.ok) {
+        errorText = await resp.text();
+      }
+    } else if (resp.status === 429 && !errorText.includes("free-models-per-day")) {
+      // 2. Upstream provider temporary rate-limit or overload (only if not a hard daily limit)
       let retryDelay = 3000;
       try {
-        const parsed = JSON.parse(text);
+        const parsed = JSON.parse(errorText);
         if (parsed.error?.metadata?.retry_after_seconds) {
           retryDelay = Math.min(Number(parsed.error.metadata.retry_after_seconds) * 1000, 6000);
         }
@@ -339,12 +342,14 @@ async function chatViaOpenAiCompatible(params: {
         body: JSON.stringify(requestBody),
         timeout: INFERENCE_TIMEOUT_MS,
       });
+      if (!resp.ok) {
+        errorText = await resp.text();
+      }
     }
 
     if (!resp.ok) {
-      const secondErrText = await resp.text();
       throw new Error(
-        `Inference error (${params.backend}): ${resp.status}: ${secondErrText}`,
+        `Inference error (${params.backend}): ${resp.status}: ${errorText}`,
       );
     }
   }
