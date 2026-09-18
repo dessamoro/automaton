@@ -27,8 +27,12 @@ const logger = createLogger("tools");
 
 // ─── Path Confinement ─────────────────────────────────────────
 // write_file is restricted to the sandbox home directory tree.
-// The sandbox home is /root for both local and remote execution.
-const SANDBOX_HOME = "/root";
+// Resolve from SANDBOX_DIR env var, or default to .sandbox/ in the process's
+// working directory — which matches LocalProvider's own rootDir default.
+// This ensures writes work for any OS user (root, codespace, etc.).
+const SANDBOX_HOME = process.env.SANDBOX_DIR
+  ? nodePath.resolve(process.env.SANDBOX_DIR)
+  : nodePath.resolve(process.cwd(), ".sandbox");
 
 /**
  * Validate that a file path resolves to within the allowed root directory.
@@ -3206,6 +3210,57 @@ Model: ${ctx.inference.getDefaultModel()}
         }
 
         return lines.join("\n");
+      },
+    },
+
+    // ── Oracle / Human Escalation ──
+    {
+      name: "ask_oracle",
+      description:
+        "Ask your human operator for guidance when you are stuck, confused, or blocked after trying available approaches. " +
+        "Describe exactly what you tried and why it failed. The operator will respond via your inbox. " +
+        "Use this instead of looping on the same failed action more than twice.",
+      category: "social" as ToolCategory,
+      riskLevel: "safe" as RiskLevel,
+      parameters: {
+        type: "object",
+        properties: {
+          question: {
+            type: "string",
+            description: "The specific question or decision you need help with",
+          },
+          context: {
+            type: "string",
+            description: "What you have tried and why it failed (be specific)",
+          },
+        },
+        required: ["question"],
+      },
+      execute: async (args, ctx) => {
+        const question = args.question as string;
+        const context = (args.context as string) || "";
+        // Persist the pending question so the oracle CLI can display it
+        ctx.db.setKV(
+          "oracle_pending_question",
+          JSON.stringify({
+            question,
+            context,
+            askedAt: new Date().toISOString(),
+          }),
+        );
+        // Emit a visible alert to the terminal log
+        logger.warn(
+          `\n🔮 [ORACLE REQUEST] Lakshmi needs your guidance!\n` +
+          `   Question: "${question}"\n` +
+          `   Context:  ${context || "(none)"}\n` +
+          `   Respond:  npm run oracle -- "Your answer here"\n`,
+        );
+        return (
+          `Oracle request recorded.\n` +
+          `Question: "${question}"\n\n` +
+          `Your operator has been notified. You will receive a response in your inbox.\n` +
+          `You may sleep briefly or continue other tasks while waiting.`
+        );
       },
     },
   ];
