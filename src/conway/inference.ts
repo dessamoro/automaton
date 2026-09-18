@@ -244,11 +244,13 @@ function resolveInferenceBackend(
 
   // Heuristic fallback (model not in registry yet)
   if (/^drael/i.test(model)) return "openai";
-  if (keys.geminiApiKey || /^gemini/i.test(model)) return "gemini";
-  if (keys.anthropicApiKey && /^claude/i.test(model)) return "anthropic";
-  if (keys.openaiApiKey && (/^(gpt-[3-9]|gpt-4|gpt-5|o[1-9][-\s.]|o[1-9]$|chatgpt)/i.test(model) || process.env.OPENAI_BASE_URL || process.env.DRAEL_BASE_URL)) return "openai";
+  if (/^claude/i.test(model) && keys.anthropicApiKey) return "anthropic";
+  if (/^gemini/i.test(model) && keys.geminiApiKey) return "gemini";
+  if (keys.openaiApiKey && (/^(gpt-[3-9]|gpt-4|gpt-5|o[1-9][-\s.]|o[1-9]$|chatgpt)/i.test(model) || model.includes("/") || process.env.OPENAI_BASE_URL || process.env.DRAEL_BASE_URL)) return "openai";
   if (keys.openaiApiKey) return "openai";
+  if (keys.geminiApiKey) return "gemini";
   if (keys.groqApiKey) return "groq";
+  if (keys.anthropicApiKey) return "anthropic";
   return "conway";
 
 }
