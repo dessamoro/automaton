@@ -3501,6 +3501,32 @@ Model: ${ctx.inference.getDefaultModel()}
         }
       },
     },
+    {
+      name: "domain_recon",
+      description:
+        "Perform automated domain and infrastructure OSINT reconnaissance: DNS-over-HTTPS resolution, Certificate Transparency subdomain discovery via crt.sh, and email security verification (SPF/DMARC).",
+      category: "web",
+      riskLevel: "safe",
+      parameters: {
+        type: "object",
+        properties: {
+          domain: {
+            type: "string",
+            description: "Target domain name (e.g. 'ethereum.org' or 'base.org')",
+          },
+        },
+        required: ["domain"],
+      },
+      execute: async (args) => {
+        try {
+          const { performDomainRecon } = await import("../recon/domain-recon.js");
+          const report = await performDomainRecon(args.domain as string);
+          return JSON.stringify(report, null, 2);
+        } catch (err: any) {
+          return `Error performing domain reconnaissance: ${err.message}`;
+        }
+      },
+    },
   ];
 }
 

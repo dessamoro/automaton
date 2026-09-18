@@ -500,6 +500,16 @@ async function run(): Promise<void> {
     },
   });
 
+  x402Server.registerService({
+    name: "domain_recon",
+    description: "Automated DNS-over-HTTPS, email security (SPF/DMARC), and Certificate Transparency subdomain audit",
+    priceCents: 15, // $0.15 USDC
+    handler: async (params: { domain: string }) => {
+      const { performDomainRecon } = await import("./recon/domain-recon.js");
+      return await performDomainRecon(params.domain);
+    },
+  });
+
   try {
     await x402Server.start();
     logger.info(`[${new Date().toISOString()}] x402 Service Server started on port ${x402Port}`);
