@@ -147,9 +147,9 @@ export function createInferenceClient(
       process.env.DRAEL_BASE_URL ||
       process.env.OPENAI_BASE_URL ||
       openaiBaseUrl ||
-      (effectiveOpenRouterKey ? "https://openrouter.ai/api/v1" :
+      (effectiveOpenRouterKey || model.includes("/") ? "https://openrouter.ai/api/v1" :
        effectiveGithubToken ? "https://models.inference.ai.azure.com" : "https://api.openai.com");
-    const sanitizedOpenAiBaseUrl = rawOpenAiBaseUrl.replace(/\/+$/, "").replace(/\/v1$/, "");
+    const sanitizedOpenAiBaseUrl = (rawOpenAiBaseUrl || "https://openrouter.ai/api/v1").replace(/\/+$/, "").replace(/\/v1$/, "");
 
     const openAiLikeApiUrl =
       backend === "gemini" ? "https://generativelanguage.googleapis.com/v1beta/openai" :
@@ -263,9 +263,10 @@ async function chatViaOpenAiCompatible(params: {
   backend: "conway" | "openai" | "ollama" | "groq" | "gemini";
   httpClient: ResilientHttpClient;
 }): Promise<InferenceResponse> {
-  const rawApiUrl = params.apiUrl.replace(/\/+$/, "").replace(/\/v1$/, "");
+  const fallbackBase = params.backend === "openai" ? "https://openrouter.ai/api/v1" : "https://api.conway.tech";
+  const rawApiUrl = (params.apiUrl || fallbackBase).replace(/\/+$/, "").replace(/\/v1$/, "");
   const endpoint = params.backend === "gemini"
-    ? `${params.apiUrl}/chat/completions`
+    ? `${params.apiUrl || "https://generativelanguage.googleapis.com/v1beta/openai"}/chat/completions`
     : `${rawApiUrl}/v1/chat/completions`;
 
   // Gemini's OpenAI-compat layer supports role:"system" in messages,
