@@ -23,6 +23,8 @@ export const CORE_TOOL_NAMES = new Set([
   "fetch_bounties",
   "inspect_bounty",
   "repo_recon",
+  "audit_repo_security",
+  "scan_onchain_bounties",
 ]);
 
 export interface SkillModule {
@@ -35,15 +37,15 @@ export interface SkillModule {
 export const SKILL_MODULES: Record<string, SkillModule> = {
   recon: {
     name: "recon",
-    description: "Repository architecture, dependency, and CI reconnaissance",
-    toolNames: ["repo_recon"],
-    keywords: ["recon", "audit", "architecture", "inspect repo", "dependencies", "ci", "repository"],
+    description: "Repository architecture, dependency, and security vulnerability reconnaissance",
+    toolNames: ["repo_recon", "audit_repo_security"],
+    keywords: ["recon", "audit", "architecture", "inspect repo", "dependencies", "ci", "repository", "security", "sast", "vulnerability", "leak", "secret"],
   },
   bounties: {
     name: "bounties",
-    description: "Autonomous bounty discovery and inspection across Algora and Bountycaster",
-    toolNames: ["fetch_bounties", "inspect_bounty"],
-    keywords: ["bounty", "bounties", "job", "earn", "algora", "bountycaster", "work", "task", "revenue", "money"],
+    description: "Autonomous bounty discovery and inspection across Algora, Bountycaster, and Base on-chain escrows",
+    toolNames: ["fetch_bounties", "inspect_bounty", "scan_onchain_bounties"],
+    keywords: ["bounty", "bounties", "job", "earn", "algora", "bountycaster", "base", "escrow", "onchain", "smart contract", "work", "task", "revenue", "money"],
   },
   social: {
     name: "social",

@@ -20,15 +20,16 @@ describe("Lakshmi Framework — Skills Engine", () => {
     } catch {}
   });
 
-  it("seeds 4 boot micro-skills into an empty skills directory", () => {
+  it("seeds boot micro-skills into an empty skills directory", () => {
     ensureBootMicroSkills(testDir);
 
     const entries = fs.readdirSync(testDir);
-    expect(entries.length).toBe(4);
+    expect(entries.length).toBe(EMBEDDED_STARTER_SKILLS.length);
     expect(entries).toContain("local-environment");
     expect(entries).toContain("microservice-builder");
     expect(entries).toContain("ask-oracle-guide");
     expect(entries).toContain("error-recovery");
+    expect(entries).toContain("bounty-hunter");
 
     // Verify SKILL.md exists in each
     for (const skill of EMBEDDED_STARTER_SKILLS) {

@@ -10,7 +10,7 @@ const logger = createLogger("bounties");
 
 export interface BountyItem {
   id: string;
-  source: "algora" | "bountycaster" | "github";
+  source: "algora" | "bountycaster" | "github" | "base_onchain";
   title: string;
   url: string;
   rewardUsd: number;
@@ -19,14 +19,57 @@ export interface BountyItem {
   issueNumber?: number;
   status: "open" | "in_progress" | "completed";
   createdAt?: string;
+  network?: string;
+  escrowAddress?: string;
 }
 
 export interface FetchBountiesOptions {
-  source?: "algora" | "bountycaster" | "all";
+  source?: "algora" | "bountycaster" | "base_onchain" | "all";
   minRewardUsd?: number;
   maxRewardUsd?: number;
   tag?: string;
   limit?: number;
+}
+
+/**
+ * Fetch on-chain bounties and locked escrows on Base network
+ */
+export async function fetchBaseEscrows(options?: FetchBountiesOptions): Promise<BountyItem[]> {
+  try {
+    // Query public on-chain bounty indexer / Base protocol events
+    const url = "https://api.bountycaster.xyz/bounties/open?platform=base";
+    const response = await fetch(url, {
+      headers: {
+        "Accept": "*/*",
+        "User-Agent": "Lakshmi-Automaton/1.0",
+      },
+    });
+
+    if (!response.ok) {
+      return [];
+    }
+
+    const data = await response.json() as any;
+    const items = Array.isArray(data) ? data : data.bounties || data.items || [];
+
+    const parsed: BountyItem[] = items.map((item: any) => ({
+      id: `base-${item.id || item.escrowAddress || Math.random().toString(36).substring(2)}`,
+      source: "base_onchain",
+      title: item.title || item.text || "Base Protocol Bounty Escrow",
+      url: item.url || item.link || "https://basescan.org",
+      rewardUsd: parseFloat(String(item.amountUsd || item.amount || 0)) || 0,
+      tags: ["base", "smart-contract", "on-chain", ...(Array.isArray(item.tags) ? item.tags : [])],
+      status: "open",
+      createdAt: item.createdAt || new Date().toISOString(),
+      network: "base",
+      escrowAddress: item.escrowAddress || item.contractAddress,
+    }));
+
+    return filterBounties(parsed, options);
+  } catch (error) {
+    logger.warn("Failed to fetch Base on-chain escrows", error instanceof Error ? error : undefined);
+    return [];
+  }
 }
 
 /**
@@ -147,6 +190,11 @@ export async function fetchAllBounties(options?: FetchBountiesOptions): Promise<
   if (source === "bountycaster" || source === "all") {
     const bc = await fetchBountycasterBounties(options);
     results = results.concat(bc);
+  }
+
+  if (source === "base_onchain" || source === "all") {
+    const onchain = await fetchBaseEscrows(options);
+    results = results.concat(onchain);
   }
 
   return results.sort((a, b) => b.rewardUsd - a.rewardUsd);

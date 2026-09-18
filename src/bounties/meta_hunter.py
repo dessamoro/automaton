@@ -220,10 +220,57 @@ async def scan_algora_bounties() -> List[RawSignal]:
     return signals
 
 
+async def scan_base_escrows() -> List[RawSignal]:
+    """Scrapes on-chain Base protocol bounties and locked escrows."""
+    url = "https://api.bountycaster.xyz/bounties/open?platform=base"
+    req = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "*/*",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Lakshmi-Hunter/1.0",
+        },
+    )
+
+    loop = asyncio.get_event_loop()
+    try:
+        def fetch():
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        data = await loop.run_in_executor(None, fetch)
+    except Exception as e:
+        logger.debug(f"Base on-chain escrow scan offline or rate-limited: {e}")
+        return []
+
+    signals = []
+    items = data if isinstance(data, list) else data.get("bounties", data.get("items", []))
+    for item in items:
+        amount = float(item.get("amountUsd", 0) or item.get("amount", 0))
+        if amount <= 0:
+            continue
+
+        signals.append(
+            RawSignal(
+                source="Base_OnChain",
+                raw_data={
+                    "title": item.get("title", item.get("text", "Base Protocol Bounty")),
+                    "url": item.get("url", item.get("link", "https://basescan.org")),
+                    "network": "base",
+                    "escrow_address": item.get("escrowAddress", ""),
+                },
+                estimated_reward_usd=amount,
+                estimated_compute_cost_usd=0.25,
+                confidence_score=0.88,
+            )
+        )
+    return signals
+
+
 if __name__ == "__main__":
     hunter = MetaHunter(live=True, scan_interval_s=60.0)
     hunter.register_scanner(scan_algora_bounties)
+    hunter.register_scanner(scan_base_escrows)
     try:
         asyncio.run(hunter.run_radar())
     except KeyboardInterrupt:
         logger.info("MetaHunter radar stopped.")
+

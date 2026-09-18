@@ -78,6 +78,35 @@ describe("Bounty Hunter Service", () => {
     expect(all[1].rewardUsd).toBe(15);
   });
 
+  it("fetches and parses Base on-chain bounties correctly", async () => {
+    const mockBaseResponse = {
+      bounties: [
+        {
+          id: "base-escrow-99",
+          title: "Audit Base L2 Vault Contract",
+          amountUsd: 250,
+          escrowAddress: "0x1234567890abcdef1234567890abcdef12345678",
+          tags: ["solidity", "audit"],
+          url: "https://basescan.org/address/0x1234",
+        },
+      ],
+    };
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+      ok: true,
+      json: async () => mockBaseResponse,
+    } as any);
+
+    const { fetchBaseEscrows } = await import("../../bounties/bounty-hunter.js");
+    const bounties = await fetchBaseEscrows();
+    expect(bounties).toHaveLength(1);
+    expect(bounties[0].id).toBe("base-base-escrow-99");
+    expect(bounties[0].rewardUsd).toBe(250);
+    expect(bounties[0].source).toBe("base_onchain");
+    expect(bounties[0].network).toBe("base");
+    expect(bounties[0].escrowAddress).toBe("0x1234567890abcdef1234567890abcdef12345678");
+  });
+
   it("inspects bounty details cleanly", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
       ok: true,

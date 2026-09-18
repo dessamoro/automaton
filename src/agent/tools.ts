@@ -3429,6 +3429,78 @@ Model: ${ctx.inference.getDefaultModel()}
         }
       },
     },
+    {
+      name: "audit_repo_security",
+      description:
+        "Perform automated security vulnerability and SAST auditing on a target GitHub repository: scan for exposed credentials, dangerous logic sinks (eval, command injection, prototype pollution), CI workflow risks, and generate an actionable Responsible Disclosure report.",
+      category: "web",
+      riskLevel: "safe",
+      parameters: {
+        type: "object",
+        properties: {
+          owner: {
+            type: "string",
+            description: "GitHub owner or organization (e.g. 'octocat')",
+          },
+          repo: {
+            type: "string",
+            description: "Repository name (e.g. 'hello-world')",
+          },
+        },
+        required: ["owner", "repo"],
+      },
+      execute: async (args) => {
+        try {
+          const { performSecurityAudit } = await import("../recon/security-audit.js");
+          const report = await performSecurityAudit({
+            owner: args.owner as string,
+            repo: args.repo as string,
+          });
+          return JSON.stringify(report, null, 2);
+        } catch (err: any) {
+          return `Error performing security audit: ${err.message}`;
+        }
+      },
+    },
+    {
+      name: "scan_onchain_bounties",
+      description:
+        "Scan on-chain smart contract protocol bounties and locked reward escrows on Base network.",
+      category: "financial",
+      riskLevel: "safe",
+      parameters: {
+        type: "object",
+        properties: {
+          minRewardUsd: {
+            type: "number",
+            description: "Minimum locked reward amount in USD",
+          },
+          tag: {
+            type: "string",
+            description: "Filter keyword (e.g. 'solidity', 'base', 'frontend')",
+          },
+        },
+      },
+      execute: async (args) => {
+        try {
+          const { fetchBaseEscrows } = await import("../bounties/bounty-hunter.js");
+          const escrows = await fetchBaseEscrows(args as any);
+          if (escrows.length === 0) {
+            return "No active Base on-chain bounties matching criteria found.";
+          }
+          const list = escrows
+            .slice(0, 10)
+            .map(
+              (b) =>
+                `• [BASE ON-CHAIN] $${b.rewardUsd} - ${b.title}\n  URL: ${b.url}\n  Escrow: ${b.escrowAddress || "N/A"}`,
+            )
+            .join("\n\n");
+          return `Base On-Chain Bounty Escrows (Top ${Math.min(10, escrows.length)}):\n\n${list}`;
+        } catch (err: any) {
+          return `Error scanning on-chain bounties: ${err.message}`;
+        }
+      },
+    },
   ];
 }
 

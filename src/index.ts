@@ -490,6 +490,16 @@ async function run(): Promise<void> {
     },
   });
 
+  x402Server.registerService({
+    name: "security_audit",
+    description: "Automated SAST code security, secret leak detection, and responsible disclosure generator",
+    priceCents: 50, // $0.50 USDC
+    handler: async (params: { owner: string; repo: string; sampleFiles?: Record<string, string> }) => {
+      const { performSecurityAudit } = await import("./recon/security-audit.js");
+      return await performSecurityAudit(params);
+    },
+  });
+
   try {
     await x402Server.start();
     logger.info(`[${new Date().toISOString()}] x402 Service Server started on port ${x402Port}`);
