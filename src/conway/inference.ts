@@ -297,43 +297,56 @@ async function chatViaOpenAiCompatible(params: {
     timeout: INFERENCE_TIMEOUT_MS,
   });
 
-  if (resp.status === 429) {
-    const text = await resp.text();
-    let retryDelay = 3000;
-    try {
-      const parsed = JSON.parse(text);
-      if (parsed.error?.metadata?.retry_after_seconds) {
-        retryDelay = Math.min(Number(parsed.error.metadata.retry_after_seconds) * 1000, 6000);
-      }
-    } catch {}
-
-    await new Promise((resolve) => setTimeout(resolve, retryDelay));
-
-    // Retry once with fallback to deepseek free if openrouter pool was overloaded
-    const retryModel =
-      requestBody.model !== "deepseek/deepseek-v4-flash-0731:free" && (params.apiKey?.startsWith("sk-or-") || Boolean(process.env.OPENROUTER_API_KEY))
-        ? "deepseek/deepseek-v4-flash-0731:free"
-        : requestBody.model;
-
-    resp = await params.httpClient.request(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization:
-          params.backend === "openai" || params.backend === "ollama" || params.backend === "groq" || params.backend === "gemini"
-            ? `Bearer ${params.apiKey}`
-            : params.apiKey,
-      },
-      body: JSON.stringify({ ...requestBody, model: retryModel }),
-      timeout: INFERENCE_TIMEOUT_MS,
-    });
-  }
-
   if (!resp.ok) {
     const text = await resp.text();
-    throw new Error(
-      `Inference error (${params.backend}): ${resp.status}: ${text}`,
-    );
+
+    // 1. If OpenRouter rejected tool use, retry immediately without native tools payload
+    if (text.includes("No endpoints found that support tool use") && requestBody.tools) {
+      const { tools: _t, tool_choice: _tc, ...bodyWithoutTools } = requestBody;
+      resp = await params.httpClient.request(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization:
+            params.backend === "openai" || params.backend === "ollama" || params.backend === "groq" || params.backend === "gemini"
+              ? `Bearer ${params.apiKey}`
+              : params.apiKey,
+        },
+        body: JSON.stringify(bodyWithoutTools),
+        timeout: INFERENCE_TIMEOUT_MS,
+      });
+    } else if (resp.status === 429) {
+      // 2. Upstream provider rate-limit or overload
+      let retryDelay = 3000;
+      try {
+        const parsed = JSON.parse(text);
+        if (parsed.error?.metadata?.retry_after_seconds) {
+          retryDelay = Math.min(Number(parsed.error.metadata.retry_after_seconds) * 1000, 6000);
+        }
+      } catch {}
+
+      await new Promise((resolve) => setTimeout(resolve, retryDelay));
+
+      resp = await params.httpClient.request(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization:
+            params.backend === "openai" || params.backend === "ollama" || params.backend === "groq" || params.backend === "gemini"
+              ? `Bearer ${params.apiKey}`
+              : params.apiKey,
+        },
+        body: JSON.stringify(requestBody),
+        timeout: INFERENCE_TIMEOUT_MS,
+      });
+    }
+
+    if (!resp.ok) {
+      const secondErrText = await resp.text();
+      throw new Error(
+        `Inference error (${params.backend}): ${resp.status}: ${secondErrText}`,
+      );
+    }
   }
 
   const data = await resp.json() as any;

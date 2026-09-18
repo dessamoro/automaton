@@ -41,7 +41,11 @@ describe("OpenRouter Free Tier Integration", () => {
     expect(glm!.provider).toBe("openai");
     expect(glm!.costPer1kInput).toBe(0);
     expect(glm!.costPer1kOutput).toBe(0);
-    expect(glm!.supportsTools).toBe(true);
+    expect(glm!.supportsTools).toBe(false);
+
+    const nex = STATIC_MODEL_BASELINE.find((m) => m.modelId === "nex-agi/nex-n2.5-pro:free");
+    expect(nex).toBeDefined();
+    expect(nex!.supportsTools).toBe(true);
   });
 
   it("routes to OpenRouter free model when OPENAI_MODEL is configured", () => {
