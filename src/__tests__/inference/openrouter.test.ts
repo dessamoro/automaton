@@ -35,6 +35,13 @@ describe("OpenRouter Free Tier Integration", () => {
     expect(r1).toBeDefined();
     expect(r1!.costPer1kInput).toBe(0);
     expect(r1!.costPer1kOutput).toBe(0);
+
+    const glm = STATIC_MODEL_BASELINE.find((m) => m.modelId === "z-ai/glm-5.2:free");
+    expect(glm).toBeDefined();
+    expect(glm!.provider).toBe("openai");
+    expect(glm!.costPer1kInput).toBe(0);
+    expect(glm!.costPer1kOutput).toBe(0);
+    expect(glm!.supportsTools).toBe(true);
   });
 
   it("routes to OpenRouter free model when OPENAI_MODEL is configured", () => {

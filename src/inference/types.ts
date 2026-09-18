@@ -216,6 +216,20 @@ export const STATIC_MODEL_BASELINE: Omit<ModelEntry, "lastSeen" | "createdAt" | 
     parameterStyle: "max_tokens",
     enabled: true,
   },
+  {
+    modelId: "z-ai/glm-5.2:free",
+    provider: "openai",
+    displayName: "GLM 5.2 (OpenRouter Free)",
+    tierMinimum: "normal",
+    costPer1kInput: 0,
+    costPer1kOutput: 0,
+    maxTokens: 4096,
+    contextWindow: 32768,
+    supportsTools: true,
+    supportsVision: false,
+    parameterStyle: "max_tokens",
+    enabled: true,
+  },
 ];
 
 // === Default Routing Matrix ===
