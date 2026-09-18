@@ -89,7 +89,9 @@ export function createInferenceClient(
     });
 
     if (backend === "gemini") {
-      model = "gemini-3.6-flash";
+      if (!model.startsWith("gemini")) {
+        model = "gemini-2.5-flash";
+      }
     } else if (backend === "groq") {
       model = "openai/gpt-oss-20b";
     }

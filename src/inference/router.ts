@@ -203,6 +203,21 @@ export class InferenceRouter {
       if (explicitEntry && explicitEntry.enabled) {
         return explicitEntry;
       }
+      const isGemini = /^gemini/i.test(explicitEnvModel);
+      return {
+        modelId: explicitEnvModel,
+        provider: isGemini ? "gemini" : "openai",
+        displayName: explicitEnvModel,
+        tierMinimum: "dead",
+        costPer1kInput: 0,
+        costPer1kOutput: 0,
+        maxTokens: 4096,
+        contextWindow: 128000,
+        supportsTools: true,
+        supportsVision: false,
+        parameterStyle: "max_tokens",
+        enabled: true,
+      };
     }
 
     // 1. Try routing-matrix candidates
