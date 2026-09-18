@@ -52,19 +52,22 @@ export function createInferenceClient(
   options: InferenceClientOptions,
 ): InferenceClient {
   const { apiUrl, apiKey, openaiApiKey, openaiBaseUrl, anthropicApiKey, groqApiKey, geminiApiKey, ollamaBaseUrl, getModelProvider } = options;
+  const effectiveOpenRouterKey = process.env.OPENROUTER_API_KEY || (openaiApiKey?.startsWith("sk-or-") ? openaiApiKey : undefined);
   const effectiveGithubToken = process.env.GITHUB_TOKEN || (openaiApiKey?.startsWith("ghp_") ? openaiApiKey : undefined);
   const effectiveGeminiKey = geminiApiKey || process.env.GEMINI_API_KEY || (openaiApiKey?.startsWith("AIza") ? openaiApiKey : undefined);
   const effectiveGroqKey = groqApiKey || process.env.GROQ_API_KEY || (openaiApiKey?.startsWith("gsk_") ? openaiApiKey : undefined);
   const effectiveOpenAiKey =
     openaiApiKey ||
     process.env.DRAEL_API_KEY ||
+    process.env.OPENROUTER_API_KEY ||
     process.env.OPENAI_API_KEY ||
     effectiveGithubToken;
 
+  const configuredOpenAiBase = process.env.DRAEL_BASE_URL || process.env.OPENAI_BASE_URL || openaiBaseUrl;
   const httpClient = new ResilientHttpClient({
     baseTimeout: INFERENCE_TIMEOUT_MS,
     retryableStatuses: [429, 500, 502, 503, 504],
-    allowHttpOnLoopback: isLoopbackHttpUrl(ollamaBaseUrl),
+    allowHttpOnLoopback: isLoopbackHttpUrl(ollamaBaseUrl) || isLoopbackHttpUrl(configuredOpenAiBase),
   });
   let currentModel = options.defaultModel;
   let maxTokens = options.maxTokens;
@@ -92,9 +95,17 @@ export function createInferenceClient(
     }
 
     // Newer models (o-series, gpt-5.x, gpt-4.1) require max_completion_tokens.
-    // Ollama, Groq, Gemini, Drael, and GitHub Models use max_tokens.
+    // Ollama, Groq, Gemini, Drael, GitHub Models, and OpenRouter models use max_tokens.
     const usesCompletionTokens =
-      backend !== "ollama" && backend !== "groq" && backend !== "gemini" && !/^drael/i.test(model) && !/^gpt-4o/i.test(model) && !effectiveGithubToken && /^(o[1-9]|gpt-5|gpt-4\.1)/.test(model);
+      backend !== "ollama" &&
+      backend !== "groq" &&
+      backend !== "gemini" &&
+      !/^drael/i.test(model) &&
+      !/^gpt-4o/i.test(model) &&
+      !effectiveGithubToken &&
+      !effectiveOpenRouterKey &&
+      !model.includes("/") &&
+      /^(o[1-9]|gpt-5|gpt-4\.1)/.test(model);
     const tokenLimit = backend === "groq"
       ? Math.min(opts?.maxTokens || maxTokens, 2048)
       : (opts?.maxTokens || maxTokens);
@@ -136,7 +147,8 @@ export function createInferenceClient(
       process.env.DRAEL_BASE_URL ||
       process.env.OPENAI_BASE_URL ||
       openaiBaseUrl ||
-      (effectiveGithubToken ? "https://models.inference.ai.azure.com" : "https://api.openai.com");
+      (effectiveOpenRouterKey ? "https://openrouter.ai/api/v1" :
+       effectiveGithubToken ? "https://models.inference.ai.azure.com" : "https://api.openai.com");
     const sanitizedOpenAiBaseUrl = rawOpenAiBaseUrl.replace(/\/+$/, "").replace(/\/v1$/, "");
 
     const openAiLikeApiUrl =
