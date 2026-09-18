@@ -3396,6 +3396,39 @@ Model: ${ctx.inference.getDefaultModel()}
         }
       },
     },
+    {
+      name: "repo_recon",
+      description:
+        "Perform non-intrusive structural reconnaissance on a target GitHub repository: identify build system, manifest files, test harness, CI workflows, and autonomous contribution readiness.",
+      category: "web",
+      riskLevel: "safe",
+      parameters: {
+        type: "object",
+        properties: {
+          owner: {
+            type: "string",
+            description: "GitHub owner or organization (e.g. 'facebook' or 'expressjs')",
+          },
+          repo: {
+            type: "string",
+            description: "Repository name (e.g. 'react' or 'express')",
+          },
+        },
+        required: ["owner", "repo"],
+      },
+      execute: async (args) => {
+        try {
+          const { performRepoRecon } = await import("../recon/repo-recon.js");
+          const report = await performRepoRecon({
+            owner: args.owner as string,
+            repo: args.repo as string,
+          });
+          return JSON.stringify(report, null, 2);
+        } catch (err: any) {
+          return `Error performing repo reconnaissance: ${err.message}`;
+        }
+      },
+    },
   ];
 }
 

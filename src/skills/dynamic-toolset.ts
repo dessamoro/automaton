@@ -22,6 +22,7 @@ export const CORE_TOOL_NAMES = new Set([
   "ask_oracle",
   "fetch_bounties",
   "inspect_bounty",
+  "repo_recon",
 ]);
 
 export interface SkillModule {
@@ -32,6 +33,12 @@ export interface SkillModule {
 }
 
 export const SKILL_MODULES: Record<string, SkillModule> = {
+  recon: {
+    name: "recon",
+    description: "Repository architecture, dependency, and CI reconnaissance",
+    toolNames: ["repo_recon"],
+    keywords: ["recon", "audit", "architecture", "inspect repo", "dependencies", "ci", "repository"],
+  },
   bounties: {
     name: "bounties",
     description: "Autonomous bounty discovery and inspection across Algora and Bountycaster",

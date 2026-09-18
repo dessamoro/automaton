@@ -480,6 +480,16 @@ async function run(): Promise<void> {
     },
   });
 
+  x402Server.registerService({
+    name: "repo_recon",
+    description: "Automated codebase architecture, dependency, test harness, and CI audit",
+    priceCents: 25, // $0.25 USDC
+    handler: async (params: { owner: string; repo: string }) => {
+      const { performRepoRecon } = await import("./recon/repo-recon.js");
+      return await performRepoRecon(params);
+    },
+  });
+
   try {
     await x402Server.start();
     logger.info(`[${new Date().toISOString()}] x402 Service Server started on port ${x402Port}`);
