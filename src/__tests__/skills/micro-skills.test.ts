@@ -30,6 +30,7 @@ describe("Lakshmi Framework — Skills Engine", () => {
     expect(entries).toContain("ask-oracle-guide");
     expect(entries).toContain("error-recovery");
     expect(entries).toContain("bounty-hunter");
+    expect(entries).toContain("osint-investigator");
 
     // Verify SKILL.md exists in each
     for (const skill of EMBEDDED_STARTER_SKILLS) {
