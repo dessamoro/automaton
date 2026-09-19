@@ -54,7 +54,11 @@ export function createInferenceClient(
   const { apiUrl, apiKey, openaiApiKey, openaiBaseUrl, anthropicApiKey, groqApiKey, geminiApiKey, ollamaBaseUrl, getModelProvider } = options;
   const effectiveOpenRouterKey = process.env.OPENROUTER_API_KEY || (openaiApiKey?.startsWith("sk-or-") ? openaiApiKey : undefined);
   const effectiveGithubToken = process.env.GITHUB_TOKEN || (openaiApiKey?.startsWith("ghp_") ? openaiApiKey : undefined);
-  const effectiveGeminiKey = geminiApiKey || process.env.GEMINI_API_KEY || (openaiApiKey?.startsWith("AIza") ? openaiApiKey : undefined);
+  const effectiveGeminiKey =
+    geminiApiKey ||
+    process.env.GEMINI_API_KEY ||
+    (openaiApiKey?.startsWith("AIza") || openaiApiKey?.startsWith("AQ.") ? openaiApiKey : undefined) ||
+    (/^gemini/i.test(options.defaultModel) ? openaiApiKey : undefined);
   const effectiveGroqKey = groqApiKey || process.env.GROQ_API_KEY || (openaiApiKey?.startsWith("gsk_") ? openaiApiKey : undefined);
   const effectiveOpenAiKey =
     openaiApiKey ||
@@ -83,7 +87,7 @@ export function createInferenceClient(
       openaiApiKey: effectiveOpenAiKey,
       anthropicApiKey,
       groqApiKey: effectiveGroqKey,
-      geminiApiKey: effectiveGeminiKey,
+      geminiApiKey: effectiveGeminiKey || (model.startsWith("gemini") ? effectiveOpenAiKey : undefined),
       ollamaBaseUrl,
       getModelProvider,
     });
@@ -160,11 +164,15 @@ export function createInferenceClient(
       backend === "ollama" ? (ollamaBaseUrl as string).replace(/\/$/, "") :
       (apiUrl || "https://api.conway.tech");
     const openAiLikeApiKey =
-      backend === "gemini" ? (effectiveGeminiKey as string) :
+      backend === "gemini" ? (effectiveGeminiKey || effectiveOpenAiKey as string) :
       backend === "openai" ? (effectiveOpenAiKey as string) :
       backend === "groq" ? (effectiveGroqKey as string) :
       backend === "ollama" ? "ollama" :
       apiKey;
+
+    if (backend === "gemini" && !openAiLikeApiKey) {
+      throw new Error("Missing Gemini API key. Please pass GEMINI_API_KEY or OPENAI_API_KEY.");
+    }
 
     return chatViaOpenAiCompatible({
       model,
@@ -239,7 +247,7 @@ function resolveInferenceBackend(
     if (provider === "anthropic" && keys.anthropicApiKey) return "anthropic";
     if (provider === "openai" && keys.openaiApiKey) return "openai";
     if (provider === "groq" && keys.groqApiKey) return "groq";
-    if (provider === "gemini" && keys.geminiApiKey) return "gemini";
+    if (provider === "gemini" && (keys.geminiApiKey || keys.openaiApiKey)) return "gemini";
     if (provider === "conway") return "conway";
     // provider unknown or key not configured — fall through to heuristics
   }
@@ -247,7 +255,7 @@ function resolveInferenceBackend(
   // Heuristic fallback (model not in registry yet)
   if (/^drael/i.test(model)) return "openai";
   if (/^claude/i.test(model) && keys.anthropicApiKey) return "anthropic";
-  if (/^gemini/i.test(model) && keys.geminiApiKey) return "gemini";
+  if (/^gemini/i.test(model) && (keys.geminiApiKey || keys.openaiApiKey)) return "gemini";
   if (keys.openaiApiKey && (/^(gpt-[3-9]|gpt-4|gpt-5|o[1-9][-\s.]|o[1-9]$|chatgpt)/i.test(model) || model.includes("/") || process.env.OPENAI_BASE_URL || process.env.DRAEL_BASE_URL)) return "openai";
   if (keys.openaiApiKey) return "openai";
   if (keys.geminiApiKey) return "gemini";
