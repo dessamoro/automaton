@@ -17,6 +17,40 @@ When conducting intelligence collection or fulfilling paid reconnaissance tasks 
 
 ---
 
+## 1.1 OpenOSINT Engine & Native MCP Integration
+
+Lakshmi integrates with the [OpenOSINT](https://github.com/OpenOSINT/OpenOSINT) framework (MIT), an autonomous 20-tool intelligence agent that exposes real binaries and deterministic outputs through CLI and Model Context Protocol (MCP).
+
+### Setup in Codespaces / Host
+```bash
+pip install openosint
+```
+
+### Native MCP Server Configuration (`openosint mcp`)
+Any MCP-compatible client (Antigravity IDE, Claude Code, OpenCode) can expose all 20 tools directly:
+```json
+{
+  "mcpServers": {
+    "openosint": {
+      "command": "openosint",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+### Direct Tool Execution via Lakshmi `exec`
+Lakshmi can invoke the 20 specialized OpenOSINT tools directly:
+* **Account & Profile Discovery**: `openosint username <handle>` (Sherlock over 400+ platforms)
+* **Email Exposure**: `openosint email <email>` (Holehe registration enumeration)
+* **Breach Intel**: `openosint breach <email>` (HaveIBeenPwned API)
+* **Domain & DNS**: `openosint dns <domain>` / `openosint whois <domain>`
+* **Infrastructure**: `openosint ip <ip>` / `openosint shodan <ip>` / `openosint censys <query>`
+* **Malware & Reputation**: `openosint virustotal <target>` / `openosint abuseipdb <ip>`
+* **Automated Dorking**: `openosint dorks <target>` (Generates 12 targeted dork URLs)
+
+---
+
 ## 2. Network Intelligence
 
 Gather infrastructure, routing, and hosting telemetry using local toolchain (`dig`, `whois`, `curl`, Python).
