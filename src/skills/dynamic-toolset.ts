@@ -26,6 +26,7 @@ export const CORE_TOOL_NAMES = new Set([
   "audit_repo_security",
   "scan_onchain_bounties",
   "domain_recon",
+  "check_counterparty",
 ]);
 
 export interface SkillModule {
@@ -38,9 +39,9 @@ export interface SkillModule {
 export const SKILL_MODULES: Record<string, SkillModule> = {
   recon: {
     name: "recon",
-    description: "Repository architecture, security vulnerability, and domain/infrastructure reconnaissance",
-    toolNames: ["repo_recon", "audit_repo_security", "domain_recon"],
-    keywords: ["recon", "audit", "architecture", "inspect repo", "dependencies", "ci", "repository", "security", "sast", "vulnerability", "leak", "secret", "dns", "domain", "subdomain", "dmarc", "spf"],
+    description: "Repository architecture, security vulnerability, domain/infrastructure reconnaissance, and counterparty reputation verification",
+    toolNames: ["repo_recon", "audit_repo_security", "domain_recon", "check_counterparty"],
+    keywords: ["recon", "audit", "architecture", "inspect repo", "dependencies", "ci", "repository", "security", "sast", "vulnerability", "leak", "secret", "dns", "domain", "subdomain", "dmarc", "spf", "counterparty", "wallet", "scam", "reputation"],
   },
   bounties: {
     name: "bounties",

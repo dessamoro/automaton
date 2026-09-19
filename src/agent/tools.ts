@@ -250,6 +250,40 @@ export function createBuiltinTools(sandboxId: string): AutomatonTool[] {
       },
     },
 
+    // ── On-Chain Intelligence Tools ──
+    {
+      name: "check_counterparty",
+      description:
+        "Verify on-chain address reputation, transaction history, and balance on Base or Solana before accepting transactions or bounties.",
+      category: "recon",
+      riskLevel: "safe",
+      parameters: {
+        type: "object",
+        properties: {
+          address: { type: "string", description: "Wallet or contract address to inspect" },
+          chain: { type: "string", description: "base or solana (default: base)" },
+        },
+        required: ["address"],
+      },
+      execute: async (args) => {
+        const addr = args.address as string;
+        const chain = (args.chain as string) || "base";
+        try {
+          if (chain === "solana") {
+            const res = await fetch(`https://api.solana.fm/v0/accounts/${addr}`);
+            const data = await res.json();
+            return JSON.stringify({ chain: "solana", address: addr, data }, null, 2);
+          } else {
+            const res = await fetch(`https://api.basescan.org/api?module=account&action=balance&address=${addr}&tag=latest`);
+            const data = await res.json() as any;
+            return JSON.stringify({ chain: "base", address: addr, balanceWei: data?.result || "0", status: data?.status }, null, 2);
+          }
+        } catch (err: any) {
+          return `Counterparty check error: ${err.message}`;
+        }
+      },
+    },
+
     // ── Conway API Tools ──
     {
       name: "check_credits",

@@ -138,6 +138,69 @@ Every artifact collected must undergo technical authenticity testing before bein
 2. **EXIF Metadata**: Extract GPS coordinates, camera serial, software edits via `exiftool` / Python `PIL`.
 3. **Error Level Analysis (ELA)**: Detect resaved layers, synthetic splice marks, and compression artifacts.
 
+---
+
+## 6.1 Attack Surface Discovery Pipelines
+
+When performing domain and perimeter reconnaissance, chain high-speed discovery tools into automated pipelines:
+
+```bash
+# Subdomain Discovery -> Live Probing -> Tech Fingerprinting Pipeline
+subfinder -d target.com -silent | httpx -td -server -title -status-code -asn
+
+# Historical URL & Endpoint Discovery (Wayback Machine archive dump)
+curl -s "http://web.archive.org/cdx/search/cdx?url=*.target.com/*&output=json&collapse=urlkey" | \
+  jq -r '.[1:][] | .[2]' | sort -u > .sandbox/recon/wayback_endpoints.txt
+
+# Certificate Transparency Log parsing (crt.sh)
+curl -s "https://crt.sh/?q=%.target.com&output=json" | jq -r '.[].name_value' | sort -u
+```
+
+---
+
+## 6.2 Forensic Evidence Capture & Chain of Custody
+
+For high-confidence reporting and audit integrity, capture forensic-grade snapshots of target web pages:
+
+```bash
+# Monolith: Save entire webpage as a single self-contained HTML file (offline evidence)
+monolith -j "https://target-site.com" -o ".sandbox/recon/evidence_$(date +%s).html"
+
+# Programmatic preservation to the Wayback Machine
+python3 -c '
+import urllib.request
+url = "https://web.archive.org/save/https://target-site.com"
+req = urllib.request.Request(url, headers={"User-Agent": "Lakshmi-Archivist/1.0"})
+try:
+    urllib.request.urlopen(req)
+    print("Submitted target to Wayback Machine successfully.")
+except Exception as e: print(f"Archival failed: {e}")
+'
+```
+
+---
+
+## 6.3 Cryptocurrency & On-Chain Intelligence (EVM & Solana)
+
+Because Lakshmi operates as a sovereign financial agent handling Base (EIP-155:8453) and Solana transactions, on-chain intelligence is a native investigative vector.
+
+### On-Chain Investigation Vectors
+* **Wallet Clustering & Counterparty Analysis**: Map transaction flows between target wallets, DEX routers, and CEX deposit addresses.
+* **Scam & Malicious Address Reputation**:
+  * **ChainAbuse** (`https://www.chainabuse.com`): Multi-chain crowdsourced scam & exploit database.
+  * **CryptoScamDB** (`https://cryptoscamdb.org`): Malicious smart contracts and phishing domains.
+  * **BitcoinAbuse** (`https://www.bitcoinabuse.com`): Ransomware and extortion wallet reports.
+* **Explorer APIs**:
+  * **EVM (Base / Ethereum)**: Etherscan / Basescan API (`/api?module=account&action=txlist&address=...`)
+  * **Solana**: SolanaFM / Solscan (`https://api.solana.fm/v0/...`)
+
+### Autonomous Transaction Check (Lakshmi `exec`)
+```bash
+# Quick EVM Address Transaction Probe via curl
+curl -s "https://api.basescan.org/api?module=account&action=balance&address=0xYourTargetAddress&tag=latest" | jq .
+```
+
+
 ### Account Verification Matrix
 * **Creation Timestamp**: Check UNIX timestamp against historical service milestones.
 * **Cross-Platform Handle Parity**: Check handle reuse across Keybase, GitHub, Mastodon, X, Telegram.
