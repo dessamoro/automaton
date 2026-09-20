@@ -146,6 +146,30 @@ export class LocalWorkerPool {
       const result = await harness.execute();
 
       if (result.success) {
+        // Deterministic Verification Gate: For coding and bounty tasks, verify compile integrity
+        const isCodingTask =
+          task.agentRole === "coder" ||
+          /typescript|type|build|compile|bounty/i.test(task.title);
+        if (isCodingTask && this.config.conway?.exec) {
+          try {
+            const check = await this.config.conway.exec("npx tsc --noEmit", 30_000);
+            if (check.exitCode !== 0) {
+              const compilerErr = check.stderr || check.stdout || "TypeScript compile check failed";
+              logger.warn(`[WORKER ${workerId}] Verification gate failed: ${compilerErr.slice(0, 150)}`);
+              failTask(
+                this.config.db,
+                task.id,
+                `Verification failed: TypeScript compile errors:\n${compilerErr.slice(0, 500)}`,
+                true,
+              );
+              return;
+            }
+            logger.info(`[WORKER ${workerId}] Verification gate passed (tsc --noEmit clean)`);
+          } catch (verifyErr: any) {
+            logger.warn(`[WORKER ${workerId}] Verification gate check skipped: ${verifyErr.message}`);
+          }
+        }
+
         completeTask(this.config.db, task.id, result);
         logger.info("Local worker completed task", {
           workerId,

@@ -16,16 +16,29 @@ import path from "path";
 import os from "os";
 import { ulid } from "ulid";
 
+import fs from "fs";
+
 const HOME_DIR = process.env.HOME || process.env.USERPROFILE || os.homedir();
 const AUTOMATON_DIR = path.join(HOME_DIR, ".automaton");
-const DB_PATH = path.join(AUTOMATON_DIR, "automaton.db");
+const STATE_DB_PATH = path.join(AUTOMATON_DIR, "state.db");
+const LEGACY_DB_PATH = path.join(AUTOMATON_DIR, "automaton.db");
+const DB_PATH = fs.existsSync(STATE_DB_PATH) ? STATE_DB_PATH : (fs.existsSync(LEGACY_DB_PATH) ? LEGACY_DB_PATH : STATE_DB_PATH);
 
 function openDb() {
   try {
-    return new Database(DB_PATH, { readonly: false });
+    if (!fs.existsSync(AUTOMATON_DIR)) {
+      fs.mkdirSync(AUTOMATON_DIR, { recursive: true });
+    }
+    const db = new Database(DB_PATH, { readonly: false });
+    // Ensure minimal required tables exist
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT);
+      CREATE TABLE IF NOT EXISTS inbox_messages (id TEXT PRIMARY KEY, from_address TEXT, to_address TEXT, content TEXT, received_at TEXT, status TEXT);
+      CREATE TABLE IF NOT EXISTS wake_events (id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT, reason TEXT, payload TEXT, created_at TEXT DEFAULT (datetime('now')));
+    `);
+    return db;
   } catch (err: any) {
-    console.error(`\n❌ Could not open automaton.db at ${DB_PATH}`);
-    console.error(`   Is the automaton installed? (Run npm start -- --init first)\n`);
+    console.error(`\n❌ Could not open database at ${DB_PATH}`);
     console.error(err.message);
     process.exit(1);
   }

@@ -217,6 +217,9 @@ export class InferenceRouter {
         supportsVision: false,
         parameterStyle: "max_tokens",
         enabled: true,
+        lastSeen: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
       };
     }
 

@@ -257,11 +257,28 @@ export class ContextManager {
     }
 
     if (params.memories && params.memories.trim().length > 0) {
-      const memoryMessage: ChatMessage = {
+      // system-0: Enforce strict memory ceiling to prevent Context Rot (Jaggedness #5)
+      const MAX_RETRIEVED_MEMORY_TOKENS = 1500;
+      let memoryContent = params.memories.trim();
+      
+      let memoryMessage: ChatMessage = {
         role: "system",
-        content: `## Retrieved memories\n${params.memories.trim()}`,
+        content: `## Retrieved memories\n${memoryContent}`,
       };
-      const candidateTokens = this.countMessagesTokens([memoryMessage]);
+      let candidateTokens = this.countMessagesTokens([memoryMessage]);
+
+      if (candidateTokens > MAX_RETRIEVED_MEMORY_TOKENS) {
+        // Truncate linearly based on char-to-token ratio
+        const ratio = MAX_RETRIEVED_MEMORY_TOKENS / candidateTokens;
+        const targetLen = Math.floor(memoryContent.length * ratio * 0.95);
+        memoryContent = memoryContent.substring(0, targetLen) + "\n...[TRUNCATED: Context Rot Hygiene]";
+        memoryMessage = {
+          role: "system",
+          content: `## Retrieved memories\n${memoryContent}`,
+        };
+        candidateTokens = this.countMessagesTokens([memoryMessage]);
+      }
+
       if (usedTokens + candidateTokens <= promptCapacity) {
         messages.push(memoryMessage);
         usedTokens += candidateTokens;

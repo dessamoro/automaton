@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
+  fetchGitHubBounties,
   fetchAlgoraBounties,
   fetchBountycasterBounties,
   fetchAllBounties,
@@ -9,6 +10,35 @@ import {
 describe("Bounty Hunter Service", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("fetches and parses GitHub bounties correctly", async () => {
+    const mockGitHubResponse = {
+      items: [
+        {
+          id: 998877,
+          number: 42,
+          title: "Fix crash in buffer allocation [$150]",
+          body: "We will pay $150 for a clean PR.",
+          html_url: "https://github.com/org/repo/issues/42",
+          repository_url: "https://api.github.com/repos/org/repo",
+          labels: [{ name: "bounty" }, { name: "typescript" }],
+          created_at: "2026-09-20T00:00:00Z",
+        },
+      ],
+    };
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+      ok: true,
+      json: async () => mockGitHubResponse,
+    } as any);
+
+    const bounties = await fetchGitHubBounties({ tag: "typescript", minRewardUsd: 50 });
+    expect(bounties).toHaveLength(1);
+    expect(bounties[0].id).toBe("github-998877");
+    expect(bounties[0].rewardUsd).toBe(150);
+    expect(bounties[0].source).toBe("github");
+    expect(bounties[0].repo).toBe("org/repo");
   });
 
   it("fetches and parses Algora bounties correctly", async () => {
@@ -26,6 +56,7 @@ describe("Bounty Hunter Service", () => {
 
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
       ok: true,
+      headers: new Headers({ "content-type": "application/json" }),
       json: async () => mockAlgoraResponse,
     } as any);
 
@@ -65,6 +96,13 @@ describe("Bounty Hunter Service", () => {
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce({
         ok: true,
+        json: async () => ({
+          items: [{ id: "gh-1", number: 1, title: "Super High reward $500", html_url: "https://github.com/a/b/1", labels: [{ name: "bounty" }] }],
+        }),
+      } as any)
+      .mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ "content-type": "application/json" }),
         json: async () => [{ id: "1", title: "Low reward", amount: 15, tags: ["ts"] }],
       } as any)
       .mockResolvedValueOnce({
@@ -73,9 +111,10 @@ describe("Bounty Hunter Service", () => {
       } as any);
 
     const all = await fetchAllBounties();
-    expect(all).toHaveLength(2);
-    expect(all[0].rewardUsd).toBe(100);
-    expect(all[1].rewardUsd).toBe(15);
+    expect(all).toHaveLength(3);
+    expect(all[0].rewardUsd).toBe(500);
+    expect(all[1].rewardUsd).toBe(100);
+    expect(all[2].rewardUsd).toBe(15);
   });
 
   it("fetches and parses Base on-chain bounties correctly", async () => {

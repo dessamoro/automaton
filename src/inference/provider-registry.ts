@@ -280,6 +280,15 @@ export class ProviderRegistry {
     }
   }
 
+  overrideModel(providerId: string, modelId: string): void {
+    const provider = this.providers.find((p) => p.id === providerId);
+    if (provider) {
+      for (const m of provider.models) {
+        m.id = modelId;
+      }
+    }
+  }
+
   static fromConfig(configPath: string): ProviderRegistry {
     let providers = DEFAULT_PROVIDERS.map((provider) => deepCloneProvider(provider));
     let tierDefaults = DEFAULT_TIER_DEFAULTS;
@@ -462,6 +471,18 @@ export class ProviderRegistry {
 
     if (provider.id === "local") {
       return "local";
+    }
+
+    // Heuristic fallbacks for OpenAI-compatible providers (Nvidia, OpenRouter, Gemini)
+    if (provider.id === "openai") {
+      const fallback =
+        process.env.NVIDIA_API_KEY ||
+        process.env.OPENROUTER_API_KEY ||
+        process.env.GEMINI_API_KEY ||
+        (process.env.GITHUB_TOKEN ? process.env.GITHUB_TOKEN : undefined);
+      if (fallback && fallback.length > 0) {
+        return fallback;
+      }
     }
 
     return `missing-${provider.apiKeyEnvVar.toLowerCase()}`;

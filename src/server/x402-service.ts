@@ -64,6 +64,129 @@ export class X402ServiceServer {
   }
 
   /**
+   * Get standard Agent Discovery Manifest (A2A / EIP Discovery)
+   */
+  getManifest(): Record<string, any> {
+    const services = Array.from(this.services.values()).map((s) => ({
+      name: s.name,
+      description: s.description,
+      priceUsd: `$${(s.priceCents / 100).toFixed(2)}`,
+      priceCents: s.priceCents,
+      endpoint: `/services/${s.name}`,
+    }));
+
+    return {
+      name: "Lakshmi",
+      description:
+        "Sovereign Conway Automaton offering paid OSINT, Security Audits, Repo Reconnaissance, and Autonomous Software Engineering.",
+      version: "1.0.0",
+      identity: {
+        address: this.config.walletAddress,
+        network: this.config.network,
+        chain: this.config.network.startsWith("eip155") ? "base" : this.config.network,
+      },
+      payment: {
+        protocol: "x402",
+        currency: "USDC",
+        usdcAddress: this.config.usdcContract,
+        payToAddress: this.config.walletAddress,
+      },
+      endpoints: {
+        manifest: "/.well-known/agent.json",
+        health: "/health",
+        services: "/services",
+        inbox: "/inbox",
+      },
+      capabilities: [
+        "repo_recon",
+        "security_audit",
+        "domain_recon",
+        "worktree_spawn",
+        "ai_summarize",
+        "bounty_resolution",
+      ],
+      services,
+    };
+  }
+
+  private renderHtmlLanding(): string {
+    const manifest = this.getManifest();
+    const serviceRows = manifest.services
+      .map(
+        (s: any) => `
+        <tr style="border-bottom: 1px solid #2d3748;">
+          <td style="padding: 12px; font-weight: 600; color: #63b3ed;"><code>${s.name}</code></td>
+          <td style="padding: 12px; color: #cbd5e0;">${s.description}</td>
+          <td style="padding: 12px; color: #48bb78; font-weight: bold;">${s.priceUsd}</td>
+          <td style="padding: 12px;"><code style="background: #2d3748; padding: 4px 8px; border-radius: 4px; color: #e2e8f0;">POST ${s.endpoint}</code></td>
+        </tr>`,
+      )
+      .join("");
+
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Lakshmi | Sovereign Autonomous Agent</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 30px 20px; line-height: 1.6; }
+    .container { max-width: 900px; margin: 0 auto; }
+    .badge { display: inline-block; background: #065f46; color: #34d399; font-size: 0.8rem; font-weight: 700; padding: 4px 10px; border-radius: 9999px; margin-bottom: 12px; }
+    h1 { margin: 0 0 8px 0; font-size: 2.2rem; color: #f1f5f9; }
+    .lead { color: #94a3b8; font-size: 1.1rem; margin-bottom: 24px; }
+    .card { background: #1e293b; border-radius: 12px; padding: 24px; margin-bottom: 24px; border: 1px solid #334155; }
+    table { width: 100%; border-collapse: collapse; text-align: left; margin-top: 12px; }
+    th { padding: 12px; color: #94a3b8; border-bottom: 2px solid #334155; font-size: 0.9rem; text-transform: uppercase; }
+    pre { background: #090d16; padding: 16px; border-radius: 8px; overflow-x: auto; color: #38bdf8; font-size: 0.9rem; border: 1px solid #1e293b; }
+    a { color: #38bdf8; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <span class="badge">● ONLINE &bull; SOVEREIGN NODE</span>
+    <h1>Lakshmi &mdash; Conway Automaton</h1>
+    <p class="lead">${manifest.description}</p>
+    
+    <div class="card">
+      <h3 style="margin-top:0; color:#cbd5e1;">Agent Identity & Micropayment Protocol</h3>
+      <p style="margin: 4px 0;"><strong>Base / EVM Wallet:</strong> <code style="color: #fbbf24;">${manifest.identity.address}</code></p>
+      <p style="margin: 4px 0;"><strong>Protocol:</strong> HTTP 402 (<a href="https://x402.org" target="_blank">x402</a>) &bull; <strong>Settlement:</strong> Base USDC (${manifest.payment.usdcAddress})</p>
+      <p style="margin: 4px 0;"><strong>Agent Manifest:</strong> <a href="/.well-known/agent.json">/.well-known/agent.json</a></p>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0; color:#cbd5e1;">Available Paid Micro-Services</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Service</th>
+            <th>Description</th>
+            <th>Price</th>
+            <th>Endpoint</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${serviceRows}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0; color:#cbd5e1;">Quick Invocation (A2A Client Example)</h3>
+      <pre><code># 1. Probe service
+curl https://bumpy-falcons-mate.loca.lt/services/domain_recon -X POST -d '{"domain":"base.org"}'
+
+# 2. Returns HTTP 402 with payToAddress and required USDC amount.
+# 3. Repeat request with verified 'X-Payment' signature header to receive instant report.</code></pre>
+    </div>
+  </div>
+</body>
+</html>`;
+  }
+
+  /**
    * Start HTTP server.
    */
   async start(): Promise<void> {
@@ -100,11 +223,34 @@ export class X402ServiceServer {
     // CORS headers
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Payment, Authorization");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Payment, Authorization, X-Caller-Address");
 
     if (req.method === "OPTIONS") {
       res.writeHead(204);
       res.end();
+      return;
+    }
+
+    // Agent Discovery Manifest (EIP / A2A Standard)
+    if (
+      (pathname === "/.well-known/agent.json" || pathname === "/manifest.json") &&
+      req.method === "GET"
+    ) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(this.getManifest(), null, 2));
+      return;
+    }
+
+    // Root landing page
+    if (pathname === "/" && req.method === "GET") {
+      const accept = req.headers.accept || "";
+      if (accept.includes("text/html")) {
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        res.end(this.renderHtmlLanding());
+        return;
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(this.getManifest(), null, 2));
       return;
     }
 

@@ -142,6 +142,12 @@ export async function runAgentLoop(
       if (process.env.DRAEL_BASE_URL && !process.env.OPENAI_BASE_URL) {
         process.env.OPENAI_BASE_URL = process.env.DRAEL_BASE_URL;
       }
+      if (process.env.OPENROUTER_API_KEY && !process.env.OPENAI_API_KEY) {
+        process.env.OPENAI_API_KEY = process.env.OPENROUTER_API_KEY;
+        if (!process.env.OPENAI_BASE_URL) {
+          process.env.OPENAI_BASE_URL = "https://openrouter.ai/api/v1";
+        }
+      }
       if (config.openaiApiKey && !process.env.OPENAI_API_KEY) {
         process.env.OPENAI_API_KEY = config.openaiApiKey;
       }
@@ -169,10 +175,20 @@ export async function runAgentLoop(
       );
       const registry = ProviderRegistry.fromConfig(providersPath);
 
-      // If OPENAI_BASE_URL was set (Conway fallback), update the default
-      // provider's baseUrl so the OpenAI client points to Conway Compute.
-      if (process.env.OPENAI_BASE_URL) {
-        registry.overrideBaseUrl("openai", process.env.OPENAI_BASE_URL);
+      // If OPENAI_BASE_URL was set (or NVIDIA NIM key present), update the default
+      // provider's baseUrl so the OpenAI client points to the right gateway.
+      const effectiveBaseUrl =
+        process.env.OPENAI_BASE_URL ||
+        (process.env.OPENAI_API_KEY?.startsWith("nvapi-") || process.env.NVIDIA_API_KEY ? "https://integrate.api.nvidia.com/v1" : undefined);
+      if (effectiveBaseUrl) {
+        registry.overrideBaseUrl("openai", effectiveBaseUrl);
+      }
+
+      // If a custom model is configured, override the default models so worker
+      // harnesses do not attempt to call hardcoded gpt-4.1 on an incompatible provider.
+      const configuredModel = process.env.OPENAI_MODEL || config.inferenceModel;
+      if (configuredModel) {
+        registry.overrideModel("openai", configuredModel);
       }
 
       const unifiedInference = new UnifiedInferenceClient(registry);
@@ -214,6 +230,9 @@ export async function runAgentLoop(
         inference: unifiedInference,
         identity,
         isWorkerAlive: (address: string) => {
+          if (address === identity.address) {
+            return true;
+          }
           if (address.startsWith("local://")) {
             return initializedWorkerPool.hasWorker(address);
           }
@@ -552,6 +571,20 @@ export async function runAgentLoop(
         if (ingested.length > 0) {
           log(config, `[SIGNAL-QUEUE] Ingested ${ingested.length} active economic signal(s) into goals.`);
         }
+
+        // Autonomous Commercial Engine (Strategy 4): Prevent starvation when external radar has 0 signals
+        const immediateGoals = goalsManager.getGoalsByHorizon("immediate", true);
+        if (immediateGoals.length === 0) {
+          const autoGoal = goalsManager.addGoal({
+            title: "[AUTONOMOUS COMMERCIAL] Execute AI Whistleblower Audit & Promote x402 Paid Services",
+            horizon: "immediate",
+            description:
+              "No external bounties queued. Generate a forensic AI wrapper markup report via generate_whistleblower_report, publish to disk, and announce on social/inbox to drive x402 micropayment inbound calls.",
+            metricTarget: "1 published dossier + x402 promotion",
+          });
+          log(config, `[AUTONOMOUS-ENGINE] Generated self-directed commercial goal: "${autoGoal.title}"`);
+        }
+
         const goalsPrompt = goalsManager.formatForPrompt();
         if (goalsPrompt && goalsPrompt.trim().length > 0) {
           messages.splice(1, 0, {
@@ -567,9 +600,23 @@ export async function runAgentLoop(
         const orchestratorTick = await orchestrator.tick();
         db.setKV("orchestrator.last_tick", JSON.stringify(orchestratorTick));
         const localWorkersActive = workerPool?.getActiveCount() ?? 0;
-        const hasSelfAssignedParentTask = !!db.raw.prepare(
-          `SELECT 1 FROM task_graph WHERE assigned_to = ? AND status IN ('assigned', 'running') LIMIT 1`,
-        ).get(identity.address);
+        const selfAssignedTask = db.raw.prepare(
+          `SELECT id, title, description, agent_role, status FROM task_graph WHERE assigned_to = ? AND status IN ('assigned', 'running') ORDER BY priority DESC LIMIT 1`,
+        ).get(identity.address) as { id: string; title: string; description: string; agent_role: string; status: string } | undefined;
+        const hasSelfAssignedParentTask = !!selfAssignedTask;
+
+        if (selfAssignedTask) {
+          messages.splice(1, 0, {
+            role: "system",
+            content: `## ACTIVE ASSIGNED TASK (ID: ${selfAssignedTask.id})
+Title: ${selfAssignedTask.title}
+Role: ${selfAssignedTask.agent_role}
+Description:
+${selfAssignedTask.description}
+
+You are the assigned agent for this task. Execute the task steps using your available tools. When complete, call the 'complete_task' tool with task_id: "${selfAssignedTask.id}" and your summary output. Do not run idle commands like 'ls -la' repeatedly.`,
+          });
+        }
 
         if (
           orchestratorTick.phase === "executing" &&

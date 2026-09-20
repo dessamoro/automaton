@@ -101,12 +101,15 @@ export function saveConfig(config: AutomatonConfig): void {
   });
 }
 
+import os from "os";
+
 /**
  * Resolve ~ paths to absolute paths.
  */
 export function resolvePath(p: string): string {
   if (p.startsWith("~")) {
-    return path.join(process.env.HOME || "/root", p.slice(1));
+    const home = process.env.HOME || process.env.USERPROFILE || (typeof os.homedir === "function" ? os.homedir() : "/root");
+    return path.join(home, p.slice(1));
   }
   return p;
 }

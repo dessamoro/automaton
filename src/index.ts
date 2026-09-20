@@ -9,6 +9,22 @@
 
 import fs from "fs";
 import path from "path";
+import os from "os";
+
+// Normalize environment for Windows / cross-platform
+if (!process.env.HOME) {
+  process.env.HOME = process.env.USERPROFILE || (typeof os.homedir === "function" ? os.homedir() : "/root");
+}
+
+// Load .env automatically if present
+if (typeof (process as any).loadEnvFile === "function") {
+  try {
+    (process as any).loadEnvFile();
+  } catch {
+    // .env not present or optional
+  }
+}
+
 import { getWallet, getAutomatonDir } from "./identity/wallet.js";
 import { provision, loadApiKeyFromConfig } from "./identity/provision.js";
 import { loadConfig, resolvePath } from "./config.js";
@@ -133,6 +149,18 @@ Environment:
     process.exit(0);
   }
 
+  if (args.includes("--single-task")) {
+    const taskIndex = args.indexOf("--single-task") + 1;
+    const taskDesc = args[taskIndex];
+    if (!taskDesc) {
+      logger.error("Missing task description for --single-task");
+      process.exit(1);
+    }
+    StructuredLogger.setSink(prettySink);
+    await runSingleTask(taskDesc);
+    return;
+  }
+
   if (args.includes("--run")) {
     StructuredLogger.setSink(prettySink);
     await run();
@@ -204,8 +232,17 @@ async function run(): Promise<void> {
   if (process.env.DRAEL_BASE_URL && !process.env.OPENAI_BASE_URL) {
     process.env.OPENAI_BASE_URL = process.env.DRAEL_BASE_URL;
   }
+  if (process.env.OPENROUTER_API_KEY && !process.env.OPENAI_API_KEY) {
+    process.env.OPENAI_API_KEY = process.env.OPENROUTER_API_KEY;
+    if (!process.env.OPENAI_BASE_URL) {
+      process.env.OPENAI_BASE_URL = "https://openrouter.ai/api/v1";
+    }
+  }
   if (process.env.OPENAI_API_KEY) {
     config.openaiApiKey = process.env.OPENAI_API_KEY;
+  }
+  if (process.env.GEMINI_API_KEY) {
+    config.geminiApiKey = process.env.GEMINI_API_KEY;
   }
   if (process.env.OPENAI_MODEL || process.env.INFERENCE_MODEL) {
     config.inferenceModel = process.env.OPENAI_MODEL || process.env.INFERENCE_MODEL || config.inferenceModel;
@@ -342,8 +379,8 @@ async function run(): Promise<void> {
     defaultModel: config.inferenceModel,
     maxTokens: config.maxTokensPerTurn,
     lowComputeModel: config.modelStrategy?.lowComputeModel || "gpt-5-mini",
-    openaiApiKey: config.openaiApiKey,
-    openaiBaseUrl: process.env.OPENAI_BASE_URL,
+    openaiApiKey: config.openaiApiKey || process.env.NVIDIA_API_KEY || process.env.OPENCODE_API_KEY || process.env.OPENCODE_ZEN_API_KEY || process.env.ZEN_API_KEY,
+    openaiBaseUrl: process.env.OPENAI_BASE_URL || (process.env.NVIDIA_API_KEY || config.openaiApiKey?.startsWith("nvapi-") ? "https://integrate.api.nvidia.com/v1" : undefined) || process.env.OPENCODE_BASE_URL || ((process.env.OPENCODE_API_KEY || process.env.OPENCODE_ZEN_API_KEY || process.env.ZEN_API_KEY) ? "https://opencode.ai/zen/v1" : undefined),
     anthropicApiKey: config.anthropicApiKey,
     groqApiKey: process.env.GROQ_API_KEY || (config.openaiApiKey?.startsWith("gsk_") ? config.openaiApiKey : undefined),
     geminiApiKey: process.env.GEMINI_API_KEY || ((config.openaiApiKey?.startsWith("AIza") || config.openaiApiKey?.startsWith("AQ.") || config.inferenceModel?.startsWith("gemini")) ? config.openaiApiKey : undefined),
@@ -510,6 +547,83 @@ async function run(): Promise<void> {
     },
   });
 
+  x402Server.registerService({
+    name: "worktree_spawn",
+    description: "Spawn an isolated git worktree branch for speculative ADE execution",
+    priceCents: 5, // $0.05 USDC
+    handler: async (params: { branch: string }) => {
+      const { GitWorktreeManager } = await import("./git/worktree.js");
+      const wt = new GitWorktreeManager(process.cwd());
+      const targetPath = wt.createWorktree(params.branch);
+      return { success: true, branch: params.branch, path: targetPath };
+    },
+  });
+
+  x402Server.registerService({
+    name: "worktree_arbitrate",
+    description: "Run deterministic tests against a speculative worktree branch",
+    priceCents: 2, // $0.02 USDC
+    handler: async (params: { branch: string; testCmd: string }) => {
+      const { execSync } = await import("node:child_process");
+      const path = await import("node:path");
+      const fs = await import("node:fs");
+      // Find the worktree path by inspecting .worktrees or via git
+      try {
+        const wtRoot = path.resolve(process.cwd(), ".worktrees");
+        const dirs = fs.readdirSync(wtRoot);
+        for (const d of dirs) {
+          const wtPath = path.join(wtRoot, d);
+          const gitHead = fs.readFileSync(path.join(wtPath, ".git"), "utf8");
+          // Very naive lookup for demonstration, in a real system we track these in DB
+          if (gitHead && fs.existsSync(wtPath)) {
+            const output = execSync(params.testCmd, { cwd: wtPath, encoding: "utf8" });
+            return { success: true, output };
+          }
+        }
+        throw new Error("Worktree not found");
+      } catch (err: any) {
+        return { success: false, error: err.message };
+      }
+    },
+  });
+
+  x402Server.registerService({
+    name: "worktree_merge",
+    description: "Fast-forward merge a winning speculative branch and prune losers",
+    priceCents: 1, // $0.01 USDC
+    handler: async (params: { branch: string; pruneOthers?: string[] }) => {
+      const { GitWorktreeManager } = await import("./git/worktree.js");
+      const wt = new GitWorktreeManager(process.cwd());
+      wt.mergeWinner(params.branch);
+      if (params.pruneOthers) {
+        for (const b of params.pruneOthers) {
+          wt.removeWorktree("", b);
+        }
+      }
+      return { success: true, merged: params.branch };
+    },
+  });
+
+  x402Server.registerService({
+    name: "whistleblower_audit",
+    description: "Automated AI wrapper cost arbitrage audit, markup analysis, and published forensic report",
+    priceCents: 25, // $0.25 USDC
+    handler: async (params: any) => {
+      const { auditWrapperCost, publishWhistleblowerReport } = await import("./publishing/whistleblower.js");
+      if (params.publish) {
+        return publishWhistleblowerReport(params.target);
+      }
+      return auditWrapperCost(params.target || {
+        name: params.name || "Commercial AI SaaS",
+        category: params.category || "chatbot",
+        retailPriceMonthly: Number(params.retailPriceMonthly || 29),
+        estimatedMonthlyTokensPerUser: Number(params.estimatedMonthlyTokensPerUser || 300_000),
+        underlyingModel: params.underlyingModel || "gemini-3.6-flash",
+        claimedFeatures: params.claimedFeatures || ["AI text generation"],
+      });
+    },
+  });
+
   try {
     await x402Server.start();
     logger.info(`[${new Date().toISOString()}] x402 Service Server started on port ${x402Port}`);
@@ -616,6 +730,90 @@ async function run(): Promise<void> {
       await sleep(30_000);
     }
   }
+}
+
+async function runSingleTask(taskDesc: string): Promise<void> {
+  const config = loadConfig();
+  if (!config) {
+    logger.error("Automaton is not configured.");
+    process.exit(1);
+  }
+  const dbPath = resolvePath(config.dbPath);
+  const db = createDatabase(dbPath);
+  
+  const { runAgentLoop } = await import("./agent/loop.js");
+  const { createConwayClient } = await import("./conway/client.js");
+  const { createInferenceClient } = await import("./conway/inference.js");
+  
+  const conwayApiKey = process.env.CONWAY_API_KEY || config.conwayApiKey;
+  const conwayApiUrl = process.env.CONWAY_API_URL || "https://api.conway.tech";
+  const ollamaBaseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
+  const geminiApiKey = process.env.GEMINI_API_KEY;
+
+  if (!conwayApiKey) {
+    logger.error("CONWAY_API_KEY is not set.");
+    process.exit(1);
+  }
+
+  const { account, chainIdentity } = await getWallet();
+  const identity: AutomatonIdentity = {
+    name: config.name,
+    address: chainIdentity.address,
+    account,
+    creatorAddress: config.creatorAddress,
+    sandboxId: config.sandboxId,
+    apiKey: conwayApiKey,
+    createdAt: new Date().toISOString(),
+    chainType: config.chainType || "evm",
+    chainIdentity,
+  };
+
+  const conway = createConwayClient({
+    apiUrl: conwayApiUrl,
+    apiKey: conwayApiKey,
+    sandboxId: config.sandboxId,
+  });
+
+  const inference = createInferenceClient({
+    apiUrl: conwayApiUrl,
+    apiKey: conwayApiKey,
+    defaultModel: config.inferenceModel,
+    maxTokens: config.maxTokensPerTurn,
+    ollamaBaseUrl,
+    geminiApiKey,
+  });
+
+  const skillsDir = resolvePath(config.skillsDir ?? "skills");
+  const { loadSkills } = await import("./skills/loader.js");
+  let skills = loadSkills(skillsDir, db);
+
+  const { PolicyEngine } = await import("./agent/policy-engine.js");
+  const { SpendTracker } = await import("./agent/spend-tracker.js");
+  const { createDefaultRules } = await import("./agent/policy-rules/index.js");
+  
+  const rules = createDefaultRules(config.treasuryPolicy ?? DEFAULT_TREASURY_POLICY);
+  const policyEngine = new PolicyEngine(db.raw, rules);
+  const spendTracker = new SpendTracker(db.raw);
+
+  await runAgentLoop({
+    identity,
+    config,
+    db,
+    conway,
+    inference,
+    social: {} as any, 
+    skills,
+    policyEngine,
+    spendTracker,
+    ollamaBaseUrl,
+    onStateChange: () => {},
+    onTurnComplete: (turn) => {
+      logger.info(`Turn completed: ${turn.id}`);
+    }
+  });
+
+  logger.info("Single task execution complete.");
+  process.exit(0);
 }
 
 function sleep(ms: number): Promise<void> {

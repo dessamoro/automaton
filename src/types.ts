@@ -52,6 +52,7 @@ export interface AutomatonConfig {
   openaiApiKey?: string;
   anthropicApiKey?: string;
   ollamaBaseUrl?: string;
+  geminiApiKey?: string;
   inferenceModel: string;
   maxTokensPerTurn: number;
   heartbeatConfigPath: string;
@@ -161,6 +162,8 @@ export type ToolCategory =
   | "git"
   | "registry"
   | "replication"
+  | "recon"
+  | "web"
   | "memory";
 
 export interface ToolContext {
@@ -1157,7 +1160,7 @@ export const DEFAULT_MEMORY_BUDGET: MemoryBudget = {
 
 // === Phase 2.3: Inference & Model Strategy Types ===
 
-export type ModelProvider = "openai" | "anthropic" | "conway" | "ollama" | "other";
+export type ModelProvider = "openai" | "anthropic" | "conway" | "ollama" | "gemini" | "groq" | "other";
 
 export type InferenceTaskType =
   | "agent_turn"

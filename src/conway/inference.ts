@@ -60,14 +60,25 @@ export function createInferenceClient(
     (openaiApiKey?.startsWith("AIza") || openaiApiKey?.startsWith("AQ.") ? openaiApiKey : undefined) ||
     (/^gemini/i.test(options.defaultModel) ? openaiApiKey : undefined);
   const effectiveGroqKey = groqApiKey || process.env.GROQ_API_KEY || (openaiApiKey?.startsWith("gsk_") ? openaiApiKey : undefined);
+  const effectiveNvidiaKey = process.env.NVIDIA_API_KEY || (openaiApiKey?.startsWith("nvapi-") ? openaiApiKey : undefined);
   const effectiveOpenAiKey =
     openaiApiKey ||
+    effectiveNvidiaKey ||
     process.env.DRAEL_API_KEY ||
+    process.env.OPENCODE_API_KEY ||
+    process.env.OPENCODE_ZEN_API_KEY ||
+    process.env.ZEN_API_KEY ||
     process.env.OPENROUTER_API_KEY ||
     process.env.OPENAI_API_KEY ||
     effectiveGithubToken;
 
-  const configuredOpenAiBase = process.env.DRAEL_BASE_URL || process.env.OPENAI_BASE_URL || openaiBaseUrl;
+  const configuredOpenAiBase =
+    process.env.DRAEL_BASE_URL ||
+    process.env.OPENCODE_BASE_URL ||
+    process.env.OPENAI_BASE_URL ||
+    (effectiveNvidiaKey ? "https://integrate.api.nvidia.com/v1" : undefined) ||
+    (process.env.OPENCODE_API_KEY || process.env.OPENCODE_ZEN_API_KEY || process.env.ZEN_API_KEY ? "https://opencode.ai/zen/v1" : undefined) ||
+    openaiBaseUrl;
   const httpClient = new ResilientHttpClient({
     baseTimeout: INFERENCE_TIMEOUT_MS,
     retryableStatuses: [429, 500, 502, 503, 504],
@@ -151,7 +162,10 @@ export function createInferenceClient(
 
     const rawOpenAiBaseUrl =
       process.env.DRAEL_BASE_URL ||
+      process.env.OPENCODE_BASE_URL ||
       process.env.OPENAI_BASE_URL ||
+      (effectiveNvidiaKey ? "https://integrate.api.nvidia.com/v1" : undefined) ||
+      (process.env.OPENCODE_API_KEY || process.env.OPENCODE_ZEN_API_KEY || process.env.ZEN_API_KEY ? "https://opencode.ai/zen/v1" : undefined) ||
       openaiBaseUrl ||
       (effectiveOpenRouterKey || model.includes("/") ? "https://openrouter.ai/api/v1" :
        effectiveGithubToken ? "https://models.inference.ai.azure.com" : "https://api.openai.com");
@@ -256,7 +270,7 @@ function resolveInferenceBackend(
   if (/^drael/i.test(model)) return "openai";
   if (/^claude/i.test(model) && keys.anthropicApiKey) return "anthropic";
   if (/^gemini/i.test(model) && (keys.geminiApiKey || keys.openaiApiKey)) return "gemini";
-  if (keys.openaiApiKey && (/^(gpt-[3-9]|gpt-4|gpt-5|o[1-9][-\s.]|o[1-9]$|chatgpt)/i.test(model) || model.includes("/") || process.env.OPENAI_BASE_URL || process.env.DRAEL_BASE_URL)) return "openai";
+  if (keys.openaiApiKey && (/^(gpt-[3-9]|gpt-4|gpt-5|o[1-9][-\s.]|o[1-9]$|chatgpt)/i.test(model) || model.includes("/") || process.env.OPENAI_BASE_URL || process.env.DRAEL_BASE_URL || process.env.OPENCODE_BASE_URL || process.env.OPENCODE_API_KEY || process.env.OPENCODE_ZEN_API_KEY || process.env.ZEN_API_KEY)) return "openai";
   if (keys.openaiApiKey) return "openai";
   if (keys.geminiApiKey) return "gemini";
   if (keys.groqApiKey) return "groq";

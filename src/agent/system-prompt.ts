@@ -615,7 +615,8 @@ export function buildSystemPrompt(params: {
 Your ${addressLabel} address is ${identity.address}.
 Your creator's address is ${config.creatorAddress}.
 Your sandbox ID is ${identity.sandboxId}.
-Your chain type is ${chainType}.`,
+Your chain type is ${chainType}.
+Your absolute workspace directory is: ${process.cwd()} - NEVER attempt to read or write files outside of this directory.`,
   );
 
   // Layer 3: SOUL.md -- structured soul model injection (Phase 2.1)

@@ -24,11 +24,69 @@ export interface BountyItem {
 }
 
 export interface FetchBountiesOptions {
-  source?: "algora" | "bountycaster" | "base_onchain" | "all";
+  source?: "github" | "algora" | "bountycaster" | "base_onchain" | "all";
   minRewardUsd?: number;
   maxRewardUsd?: number;
   tag?: string;
   limit?: number;
+}
+
+/**
+ * Fetch active bounties directly from GitHub Issues (label:bounty, open)
+ */
+export async function fetchGitHubBounties(options?: FetchBountiesOptions): Promise<BountyItem[]> {
+  try {
+    const limit = Math.min(options?.limit ?? 10, 30);
+    const tagPart = options?.tag ? `+${encodeURIComponent(options.tag)}` : "";
+    const url = `https://api.github.com/search/issues?q=label:bounty+is:open+is:issue${tagPart}&sort=created&order=desc&per_page=${limit}`;
+
+    const headers: Record<string, string> = {
+      "Accept": "application/vnd.github.v3+json",
+      "User-Agent": "Lakshmi-Automaton/1.0",
+    };
+    if (process.env.GITHUB_TOKEN) {
+      headers["Authorization"] = `Bearer ${process.env.GITHUB_TOKEN}`;
+    }
+
+    const response = await fetch(url, { headers });
+    if (!response.ok) {
+      logger.warn(`GitHub Bounties API responded with status ${response.status}`);
+      return [];
+    }
+
+    const data = (await response.json()) as any;
+    const items = Array.isArray(data.items) ? data.items : [];
+
+    const parsed: BountyItem[] = items.map((item: any) => {
+      let rewardUsd = 0;
+      const textToSearch = `${item.title} ${item.body || ""}`;
+      const rewardMatch = textToSearch.match(/\$([0-9]+(?:\.[0-9]{2})?)/) || textToSearch.match(/([0-9]+)\s*(?:USD|USDC|DAI)/i);
+      if (rewardMatch && rewardMatch[1]) {
+        rewardUsd = parseFloat(rewardMatch[1].replace(/,/g, "")) || 0;
+      }
+
+      const labels = Array.isArray(item.labels) ? item.labels.map((l: any) => (typeof l === "string" ? l : l.name || "")) : [];
+      const repoName = item.repository_url ? item.repository_url.replace("https://api.github.com/repos/", "") : undefined;
+
+      return {
+        id: `github-${item.id || item.number}`,
+        source: "github",
+        title: item.title || "GitHub Bounty Issue",
+        url: item.html_url || item.url || "https://github.com",
+        rewardUsd,
+        tags: labels.filter(Boolean),
+        repo: repoName,
+        issueNumber: item.number,
+        status: "open",
+        createdAt: item.created_at || new Date().toISOString(),
+      };
+    });
+
+    return filterBounties(parsed, options);
+  } catch (error) {
+    logger.warn("Failed to fetch GitHub bounties", { error: error instanceof Error ? error.message : String(error) });
+    return [];
+  }
 }
 
 /**
@@ -49,7 +107,7 @@ export async function fetchBaseEscrows(options?: FetchBountiesOptions): Promise<
       return [];
     }
 
-    const data = await response.json() as any;
+    const data = (await response.json()) as any;
     const items = Array.isArray(data) ? data : data.bounties || data.items || [];
 
     const parsed: BountyItem[] = items.map((item: any) => ({
@@ -67,7 +125,7 @@ export async function fetchBaseEscrows(options?: FetchBountiesOptions): Promise<
 
     return filterBounties(parsed, options);
   } catch (error) {
-    logger.warn("Failed to fetch Base on-chain escrows", error instanceof Error ? error : undefined);
+    logger.warn("Failed to fetch Base on-chain escrows", { error: error instanceof Error ? error.message : String(error) });
     return [];
   }
 }
@@ -81,13 +139,19 @@ export async function fetchAlgoraBounties(options?: FetchBountiesOptions): Promi
     const url = `https://console.algora.io/api/bounties?status=active&limit=${limit}`;
     const response = await fetch(url, {
       headers: {
-        "Accept": "*/*",
+        "Accept": "application/json",
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
       },
     });
 
     if (!response.ok) {
       logger.warn(`Algora API responded with status ${response.status}`);
+      return [];
+    }
+
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.includes("application/json")) {
+      logger.warn("Algora returned non-JSON response (endpoint deprecated/moved). Returning empty.");
       return [];
     }
 
@@ -114,7 +178,7 @@ export async function fetchAlgoraBounties(options?: FetchBountiesOptions): Promi
 
     return filterBounties(parsed, options);
   } catch (error) {
-    logger.warn("Failed to fetch Algora bounties", error instanceof Error ? error : undefined);
+    logger.warn("Failed to fetch Algora bounties", { error: error instanceof Error ? error.message : String(error) });
     return [];
   }
 }
@@ -152,7 +216,7 @@ export async function fetchBountycasterBounties(options?: FetchBountiesOptions):
 
     return filterBounties(parsed, options);
   } catch (error) {
-    logger.warn("Failed to fetch Bountycaster bounties", error instanceof Error ? error : undefined);
+    logger.warn("Failed to fetch Bountycaster bounties", { error: error instanceof Error ? error.message : String(error) });
     return [];
   }
 }
@@ -181,6 +245,11 @@ function filterBounties(items: BountyItem[], options?: FetchBountiesOptions): Bo
 export async function fetchAllBounties(options?: FetchBountiesOptions): Promise<BountyItem[]> {
   const source = options?.source ?? "all";
   let results: BountyItem[] = [];
+
+  if (source === "github" || source === "all") {
+    const github = await fetchGitHubBounties(options);
+    results = results.concat(github);
+  }
 
   if (source === "algora" || source === "all") {
     const algora = await fetchAlgoraBounties(options);
