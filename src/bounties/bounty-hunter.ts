@@ -48,7 +48,10 @@ export async function fetchGitHubBounties(options?: FetchBountiesOptions): Promi
       headers["Authorization"] = `Bearer ${process.env.GITHUB_TOKEN}`;
     }
 
-    const response = await fetch(url, { headers });
+    const response = await fetch(url, {
+      headers,
+      signal: AbortSignal.timeout(6000),
+    });
     if (!response.ok) {
       logger.warn(`GitHub Bounties API responded with status ${response.status}`);
       return [];
@@ -101,6 +104,7 @@ export async function fetchBaseEscrows(options?: FetchBountiesOptions): Promise<
         "Accept": "*/*",
         "User-Agent": "Lakshmi-Automaton/1.0",
       },
+      signal: AbortSignal.timeout(6000),
     });
 
     if (!response.ok) {
@@ -142,6 +146,7 @@ export async function fetchAlgoraBounties(options?: FetchBountiesOptions): Promi
         "Accept": "application/json",
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
       },
+      signal: AbortSignal.timeout(6000),
     });
 
     if (!response.ok) {
@@ -194,6 +199,7 @@ export async function fetchBountycasterBounties(options?: FetchBountiesOptions):
         "Accept": "*/*",
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
       },
+      signal: AbortSignal.timeout(6000),
     });
 
     if (!response.ok) {
