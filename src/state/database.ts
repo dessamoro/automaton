@@ -31,6 +31,7 @@ import type {
   OpportunityStatus,
   MissionContract,
   CommercialGoal,
+  SettlementProof,
 } from "../types.js";
 import {
   SCHEMA_VERSION,
@@ -577,7 +578,7 @@ export function createDatabase(dbPath: string): AutomatonDatabase {
     getActiveOpportunity: () => getActiveOpportunity(db),
     listOpportunities: (s?: OpportunityStatus, limit?: number) => listOpportunities(db, s, limit),
     getCommercialGoal: (id?: string) => getCommercialGoal(db, id),
-    recordCommercialSettlement: (goalId: string, amountUsd: number, proof: string) => recordCommercialSettlement(db, goalId, amountUsd, proof),
+    recordCommercialSettlement: (goalId: string, proof: SettlementProof) => recordCommercialSettlement(db, goalId, proof),
     runTransaction,
     close,
     raw: db,
@@ -2811,7 +2812,7 @@ export function getCommercialGoal(db: DatabaseType, id: string = "FDV-001"): Com
     ).run(id, "FDV-001 — Autonomous First Dollar");
     row = db.prepare("SELECT * FROM commercial_goals WHERE id = ?").get(id) as any;
   }
-  let proofs: string[] = [];
+  let proofs: SettlementProof[] = [];
   try {
     proofs = JSON.parse(row.settlement_proofs || "[]");
   } catch {
@@ -2832,11 +2833,10 @@ export function getCommercialGoal(db: DatabaseType, id: string = "FDV-001"): Com
 export function recordCommercialSettlement(
   db: DatabaseType,
   goalId: string = "FDV-001",
-  amountUsd: number,
-  proof: string,
+  proof: SettlementProof,
 ): CommercialGoal {
   const goal = getCommercialGoal(db, goalId);
-  const newRevenue = Math.round((goal.realizedRevenueUsd + amountUsd) * 100) / 100;
+  const newRevenue = Math.round((goal.realizedRevenueUsd + proof.amount) * 100) / 100;
   const isAchieved = newRevenue >= goal.targetRevenueUsd;
   const newProofs = [...goal.settlementProofs, proof];
 
@@ -2851,6 +2851,7 @@ export function recordCommercialSettlement(
 
   return getCommercialGoal(db, goalId);
 }
+
 
 
 

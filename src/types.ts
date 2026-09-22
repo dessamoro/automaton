@@ -717,7 +717,7 @@ export interface AutomatonDatabase {
   getActiveOpportunity?(): Opportunity | undefined;
   listOpportunities?(status?: OpportunityStatus, limit?: number): Opportunity[];
   getCommercialGoal?(id?: string): CommercialGoal;
-  recordCommercialSettlement?(goalId: string, amountUsd: number, proof: string): CommercialGoal;
+  recordCommercialSettlement?(goalId: string, proof: SettlementProof): CommercialGoal;
 
   close(): void;
 
@@ -1610,6 +1610,22 @@ export interface Opportunity {
   actualOutcome?: number;        // 1 (settled) or 0 (failed/rejected)
 }
 
+export interface SettlementProof {
+  settlementId: string;
+  opportunityId: string;
+  asset: string;              // "USDC" | "USD"
+  amount: number;
+  network?: string;           // "base" | "solana" | "conway"
+  txHash?: string;            // blockchain settlement tx
+  blockNumber?: number;
+  provider?: string;          // payment/API provider
+  providerReference?: string;
+  recipient: string;          // Lakshmi-controlled destination address
+  verifiedAt: string;
+  verificationMethod: "onchain_rpc" | "payment_api" | "provider_webhook";
+  rawEvidenceHash: string;
+}
+
 export interface CommercialGoal {
   id: string;                    // e.g. 'FDV-001'
   title: string;
@@ -1618,6 +1634,7 @@ export interface CommercialGoal {
   status: "active" | "achieved" | "abandoned";
   startedAt: string;
   completedAt?: string;
-  settlementProofs: string[];    // tx hashes or receipt IDs
+  settlementProofs: SettlementProof[];
 }
+
 

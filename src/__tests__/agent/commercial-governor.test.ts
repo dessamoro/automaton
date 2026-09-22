@@ -326,8 +326,10 @@ describe("Commercial Governor & Opportunity Ledger", () => {
     // 3. Authoritative payment confirmation arrives from Base blockchain
     const settlementResult = governor.recordSettlement(
       "fdv-bounty",
-      10.00,
-      "0xabc123def456_tx_hash",
+      {
+        amount: 10.00,
+        txHash: "0xabc123def456_tx_hash",
+      },
       0.11,
     );
 
@@ -339,7 +341,8 @@ describe("Commercial Governor & Opportunity Ledger", () => {
     const goalAchieved = db.getCommercialGoal?.("FDV-001");
     expect(goalAchieved?.status).toBe("achieved");
     expect(goalAchieved?.realizedRevenueUsd).toBe(10.00);
-    expect(goalAchieved?.settlementProofs).toContain("0xabc123def456_tx_hash");
+    expect(goalAchieved?.settlementProofs[0].txHash).toBe("0xabc123def456_tx_hash");
+    expect(goalAchieved?.settlementProofs[0].verificationMethod).toBe("onchain_rpc");
     expect(goalAchieved?.completedAt).toBeDefined();
 
     // Actual outcome is marked as 1 for calibration
@@ -396,7 +399,7 @@ describe("Commercial Governor & Opportunity Ledger", () => {
     db.recordOpportunity?.(opp2);
 
     // Settle opp1
-    governor.recordSettlement("calib-1", 5.0, "tx-calib-1");
+    governor.recordSettlement("calib-1", { amount: 5.0, txHash: "tx-calib-1" });
 
     // Fail opp2
     governor.failMission("calib-2", "FAILED_TEST", "Tests failed");
@@ -409,4 +412,5 @@ describe("Commercial Governor & Opportunity Ledger", () => {
     expect(metrics.brierScore).toBe(0.1);
   });
 });
+
 
