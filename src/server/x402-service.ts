@@ -25,6 +25,7 @@ export interface X402ServerConfig {
   walletAddress: string;
   network?: string; // e.g., "eip155:8453" (Base) or "solana"
   usdcContract?: string;
+  publicUrl?: string;
 }
 
 export class X402ServiceServer {
@@ -40,6 +41,7 @@ export class X402ServiceServer {
       walletAddress: config.walletAddress,
       network: config.network ?? "eip155:8453",
       usdcContract: config.usdcContract ?? "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      publicUrl: config.publicUrl || "",
     };
     this.services = new Map();
   }
@@ -176,7 +178,7 @@ export class X402ServiceServer {
     <div class="card">
       <h3 style="margin-top:0; color:#cbd5e1;">Quick Invocation (A2A Client Example)</h3>
       <pre><code># 1. Probe service
-curl https://bumpy-falcons-mate.loca.lt/services/domain_recon -X POST -d '{"domain":"base.org"}'
+curl ${this.config.publicUrl || 'http://localhost:' + this.config.port}/services/domain_recon -X POST -d '{"domain":"base.org"}'
 
 # 2. Returns HTTP 402 with payToAddress and required USDC amount.
 # 3. Repeat request with verified 'X-Payment' signature header to receive instant report.</code></pre>
@@ -198,6 +200,14 @@ curl https://bumpy-falcons-mate.loca.lt/services/domain_recon -X POST -d '{"doma
       });
       this.server.listen(this.config.port, () => {
         logger.info(`x402 Service Server running on port ${this.config.port}`);
+        
+        if (process.env.X402_TUNNEL) {
+          logger.warn(`Tunneling via ${process.env.X402_TUNNEL} is requested but is currently not implemented.`);
+          logger.warn(`Please set up a manual reverse proxy and provide PUBLIC_URL instead.`);
+        } else if (!this.config.publicUrl) {
+          logger.info(`x402 server is running locally. To enable external commercial traffic, provide a PUBLIC_URL and set up a reverse proxy.`);
+        }
+        
         resolve();
       });
     });
@@ -323,6 +333,7 @@ curl https://bumpy-falcons-mate.loca.lt/services/domain_recon -X POST -d '{"doma
                 payToAddress: this.config.walletAddress,
                 requiredDeadlineSeconds: 300,
                 usdcAddress: this.config.usdcContract,
+                resource: this.config.publicUrl ? `${this.config.publicUrl}${pathname}` : undefined,
               },
             ],
           }),

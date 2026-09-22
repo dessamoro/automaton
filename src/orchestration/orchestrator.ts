@@ -9,6 +9,7 @@ import {
   failTask,
   getGoalProgress,
   getReadyTasks,
+  releaseAssignedTo,
   type Goal,
   type TaskNode,
   type TaskResult,
@@ -102,8 +103,10 @@ export class Orchestrator {
     identity: AutomatonIdentity;
     config: any;
     /** Check if a worker agent is still alive. Used to recover stale tasks. */
-    isWorkerAlive?: (address: string) => boolean;
+    isWorkerAlive?: (address: string) => boolean | Promise<boolean>;
   }) {}
+
+  private idleWorkerMisses = new Map<string, number>();
 
   async tick(): Promise<OrchestratorTickResult> {
     const counters: TickCounters = {
@@ -195,7 +198,40 @@ export class Orchestrator {
   async matchTaskToAgent(task: TaskNode): Promise<AgentAssignment> {
     const requestedRole = task.agentRole?.trim() || "generalist";
 
-    const idleAgents = this.params.agentTracker.getIdle();
+    const rawIdleAgents = this.params.agentTracker.getIdle();
+    
+    // Defense in depth: async-safe liveness filter
+    const idleAgents: typeof rawIdleAgents = [];
+    if (this.params.isWorkerAlive) {
+      const results = await Promise.allSettled(
+        rawIdleAgents.map((agent) => this.params.isWorkerAlive!(agent.address))
+      );
+      for (let i = 0; i < rawIdleAgents.length; i++) {
+        const res = results[i];
+        const isAlive = res.status === "fulfilled" ? res.value : false;
+        if (isAlive) {
+          this.idleWorkerMisses.delete(rawIdleAgents[i].address);
+          idleAgents.push(rawIdleAgents[i]);
+        } else {
+          // Only auto-fail local workers after 2 consecutive misses to prevent false negatives on remote/delayed workers
+          if (rawIdleAgents[i].address.startsWith("local://")) {
+            const misses = (this.idleWorkerMisses.get(rawIdleAgents[i].address) || 0) + 1;
+            this.idleWorkerMisses.set(rawIdleAgents[i].address, misses);
+            if (misses >= 2) {
+              this.idleWorkerMisses.delete(rawIdleAgents[i].address);
+              try {
+                this.params.agentTracker.updateStatus(rawIdleAgents[i].address, "failed");
+              } catch (err: any) {
+                logger.warn(`Failed to mark dead idle worker as failed: ${err.message}`);
+              }
+            }
+          }
+        }
+      }
+    } else {
+      idleAgents.push(...rawIdleAgents);
+    }
+
     const directRoleMatch = idleAgents.find((agent) => agent.role === requestedRole);
     if (directRoleMatch) {
       return {
@@ -207,11 +243,13 @@ export class Orchestrator {
 
     const bestIdle = this.params.agentTracker.getBestForTask(requestedRole);
     if (bestIdle) {
-      return {
-        agentAddress: bestIdle.address,
-        agentName: bestIdle.name,
-        spawned: false,
-      };
+      if (!this.params.isWorkerAlive || await this.params.isWorkerAlive(bestIdle.address)) {
+        return {
+          agentAddress: bestIdle.address,
+          agentName: bestIdle.name,
+          spawned: false,
+        };
+      }
     }
 
     const spawned = await this.trySpawnAgent(task);
@@ -219,7 +257,7 @@ export class Orchestrator {
       return spawned;
     }
 
-    const reassigned = this.findBusyAgentForReassign();
+    const reassigned = await this.findBusyAgentForReassign();
     if (reassigned) {
       return {
         agentAddress: reassigned.address,
@@ -532,18 +570,32 @@ export class Orchestrator {
     // leave tasks stuck in 'assigned' forever. Detect and reset them.
     if (this.params.isWorkerAlive) {
       const assignedTasks = getTasksByGoal(this.params.db, goal.id)
-        .filter((t) => t.status === "assigned" && t.assignedTo);
+        .filter((t) => (t.status === "assigned" || t.status === "running") && t.assignedTo);
+      const deadAddresses = new Set<string>();
       for (const task of assignedTasks) {
-        const alive = this.params.isWorkerAlive(task.assignedTo!);
+        let alive = false;
+        try {
+          alive = await this.params.isWorkerAlive(task.assignedTo!);
+        } catch {
+          alive = false;
+        }
         if (!alive) {
           logger.warn("Recovering stale task from dead worker", {
             taskId: task.id,
             worker: task.assignedTo,
           });
-          this.params.db.prepare(
-            "UPDATE task_graph SET status = 'pending', assigned_to = NULL, started_at = NULL WHERE id = ?",
-          ).run(task.id);
+
+          try {
+            this.params.agentTracker.updateStatus(task.assignedTo!, "failed");
+          } catch (err: any) {
+            logger.warn(`Failed to mark dead worker as failed: ${err.message}`);
+          }
+
+          deadAddresses.add(task.assignedTo!);
         }
+      }
+      if (deadAddresses.size > 0) {
+        releaseAssignedTo(this.params.db, Array.from(deadAddresses));
       }
     }
 
@@ -845,25 +897,44 @@ export class Orchestrator {
     }
   }
 
-  private findBusyAgentForReassign(): { address: string; name: string } | null {
+  private async findBusyAgentForReassign(): Promise<{ address: string; name: string } | null> {
     const idleAddresses = new Set(this.params.agentTracker.getIdle().map((agent) => agent.address));
 
     const rows = this.params.db.prepare(
       `SELECT name, address, status
        FROM children
        WHERE status IN ('running', 'healthy')
+         AND address NOT LIKE 'local://%'
        ORDER BY created_at ASC`,
     ).all() as { name: string; address: string; status: string }[];
 
-    const candidate = rows.find((row) => !idleAddresses.has(row.address));
-    if (!candidate) {
-      return null;
+    for (const candidate of rows) {
+      if (idleAddresses.has(candidate.address)) {
+        continue;
+      }
+
+      if (this.params.isWorkerAlive) {
+        let alive = false;
+        try {
+          alive = await this.params.isWorkerAlive(candidate.address);
+        } catch {
+          alive = false;
+        }
+        if (!alive) {
+          try {
+            this.params.agentTracker.updateStatus(candidate.address, "failed");
+          } catch {}
+          continue;
+        }
+      }
+
+      return {
+        address: candidate.address,
+        name: candidate.name,
+      };
     }
 
-    return {
-      address: candidate.address,
-      name: candidate.name,
-    };
+    return null;
   }
 
   private async trySpawnAgent(task: TaskNode): Promise<AgentAssignment | null> {

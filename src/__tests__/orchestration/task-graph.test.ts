@@ -10,6 +10,7 @@ import {
   getGoalProgress,
   getReadyTasks,
   pruneCompletedGoals,
+  releaseAssignedTo,
   type TaskNode,
   type TaskResult,
 } from "../../orchestration/task-graph.js";
@@ -726,6 +727,89 @@ describe("orchestration/task-graph", () => {
         { id: "a", dependencies: ["missing"] },
         { id: "b", dependencies: ["a"] },
       ])).toBe(false);
+    });
+  });
+
+  describe("releaseAssignedTo", () => {
+    it("releases assigned task to pending and increments retryCount when under cap", () => {
+      const goal = createGoal(db, "Goal", "Desc");
+      const taskId = insertTask(db, {
+        goalId: goal.id,
+        title: "task1",
+        description: "desc",
+        maxRetries: 3,
+        retryCount: 0,
+      });
+
+      assignTask(db, taskId, "local://dead-worker");
+      const released = releaseAssignedTo(db, ["local://dead-worker"]);
+      expect(released).toBe(1);
+
+      const task = getTaskById(db, taskId);
+      expect(task?.status).toBe("pending");
+      expect(task?.assignedTo).toBeNull();
+      expect(task?.startedAt).toBeNull();
+      expect(task?.retryCount).toBe(1);
+    });
+
+    it("fails task and blocks dependents when reassignment cap is reached", () => {
+      const goal = createGoal(db, "Goal", "Desc");
+      const taskId1 = insertTask(db, {
+        goalId: goal.id,
+        title: "task1",
+        description: "desc",
+        maxRetries: 3,
+        retryCount: 2,
+      });
+      const taskId2 = insertTask(db, {
+        goalId: goal.id,
+        title: "task2",
+        description: "desc",
+        dependencies: [taskId1],
+      });
+
+      assignTask(db, taskId1, "local://dead-worker-2");
+      const released = releaseAssignedTo(db, ["local://dead-worker-2"]);
+      expect(released).toBe(1);
+
+      const task1 = getTaskById(db, taskId1);
+      expect(task1?.status).toBe("failed");
+      expect(task1?.assignedTo).toBeNull();
+
+      const task2 = getTaskById(db, taskId2);
+      expect(task2?.status).toBe("blocked");
+    });
+
+    it("ghosts the same task past the limit across successive reassignments", () => {
+      const goal = createGoal(db, "Goal", "Desc");
+      const taskId = insertTask(db, {
+        goalId: goal.id,
+        title: "task-repeated-ghost",
+        description: "desc",
+        maxRetries: 3,
+        retryCount: 0,
+      });
+
+      // Cycle 1: assigned to ghost worker 1, dies, released
+      assignTask(db, taskId, "local://ghost-1");
+      releaseAssignedTo(db, ["local://ghost-1"]);
+      let task = getTaskById(db, taskId);
+      expect(task?.status).toBe("pending");
+      expect(task?.retryCount).toBe(1);
+
+      // Cycle 2: assigned to ghost worker 2, dies, released
+      assignTask(db, taskId, "local://ghost-2");
+      releaseAssignedTo(db, ["local://ghost-2"]);
+      task = getTaskById(db, taskId);
+      expect(task?.status).toBe("pending");
+      expect(task?.retryCount).toBe(2);
+
+      // Cycle 3: assigned to ghost worker 3, dies -> reaches cap (3 >= 3) -> fails
+      assignTask(db, taskId, "local://ghost-3");
+      releaseAssignedTo(db, ["local://ghost-3"]);
+      task = getTaskById(db, taskId);
+      expect(task?.status).toBe("failed");
+      expect(task?.assignedTo).toBeNull();
     });
   });
 });

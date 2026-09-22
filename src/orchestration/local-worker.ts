@@ -12,6 +12,7 @@ import type { HarnessContext, WorkerInferenceClient } from "../agent/harness-typ
 import { buildWisdomFromGoal, createBudgetFromTask } from "../agent/harness-types.js";
 import { HarnessRegistry } from "../agent/harness-registry.js";
 import { completeTask, failTask } from "./task-graph.js";
+import { BOOT_ID } from "./boot-id.js";
 import type { TaskNode } from "./task-graph.js";
 import { AgentWorkspace } from "./workspace.js";
 import type {
@@ -51,10 +52,12 @@ export class LocalWorkerPool {
   constructor(private readonly config: LocalWorkerConfig) {}
 
   spawn(task: TaskNode): { address: string; name: string; sandboxId: string } {
-    const workerId = `local-worker-${ulid()}`;
+    const workerId = `${BOOT_ID}-${ulid()}`;
     const workerName = `worker-${task.agentRole ?? "generalist"}-${workerId.slice(-6)}`;
     const address = `local://${workerId}`;
     const abortController = new AbortController();
+    const entry = { promise: Promise.resolve(), abortController };
+    this.activeWorkers.set(workerId, entry);
 
     const workerPromise = this.runWorker(workerId, task, abortController.signal)
       .catch((error) => {
@@ -62,6 +65,11 @@ export class LocalWorkerPool {
           workerId,
           taskId: task.id,
         });
+        try {
+          this.config.db.prepare("UPDATE children SET status = ? WHERE address = ?").run("failed", address);
+        } catch (dbErr: any) {
+          logger.warn(`Failed to update child worker status to failed: ${dbErr.message}`);
+        }
         try {
           failTask(
             this.config.db,
@@ -77,7 +85,7 @@ export class LocalWorkerPool {
         this.activeWorkers.delete(workerId);
       });
 
-    this.activeWorkers.set(workerId, { promise: workerPromise, abortController });
+    entry.promise = workerPromise;
     return { address, name: workerName, sandboxId: workerId };
   }
 
@@ -162,6 +170,11 @@ export class LocalWorkerPool {
                 `Verification failed: TypeScript compile errors:\n${compilerErr.slice(0, 500)}`,
                 true,
               );
+              try {
+                this.config.db.prepare("UPDATE children SET status = ? WHERE address = ?").run("failed", `local://${workerId}`);
+              } catch (dbErr: any) {
+                logger.warn(`Failed to update child worker status to failed: ${dbErr.message}`);
+              }
               return;
             }
             logger.info(`[WORKER ${workerId}] Verification gate passed (tsc --noEmit clean)`);
@@ -171,6 +184,11 @@ export class LocalWorkerPool {
         }
 
         completeTask(this.config.db, task.id, result);
+        try {
+          this.config.db.prepare("UPDATE children SET status = ? WHERE address = ?").run("stopped", `local://${workerId}`);
+        } catch (dbErr: any) {
+          logger.warn(`Failed to update child worker status to stopped: ${dbErr.message}`);
+        }
         logger.info("Local worker completed task", {
           workerId,
           taskId: task.id,
@@ -180,6 +198,11 @@ export class LocalWorkerPool {
         });
       } else {
         failTask(this.config.db, task.id, result.output || "Task reported failure", true);
+        try {
+          this.config.db.prepare("UPDATE children SET status = ? WHERE address = ?").run("failed", `local://${workerId}`);
+        } catch (dbErr: any) {
+          logger.warn(`Failed to update child worker status to failed: ${dbErr.message}`);
+        }
         logger.warn("Local worker reported task failure", {
           workerId,
           taskId: task.id,
@@ -192,6 +215,11 @@ export class LocalWorkerPool {
       const message = error instanceof Error ? error.message : String(error);
       logger.error(`[WORKER ${workerId}] Harness execution failed: ${message}`);
       failTask(this.config.db, task.id, message, true);
+      try {
+        this.config.db.prepare("UPDATE children SET status = ? WHERE address = ?").run("failed", `local://${workerId}`);
+      } catch (dbErr: any) {
+        logger.warn(`Failed to update child worker status to failed: ${dbErr.message}`);
+      }
     }
   }
 }

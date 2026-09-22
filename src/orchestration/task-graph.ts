@@ -232,6 +232,36 @@ export function decomposeGoal(
   });
 }
 
+export function releaseAssignedTo(db: Database, addresses: string[]): number {
+  if (addresses.length === 0) return 0;
+  
+  let releasedCount = 0;
+  withTransaction(db, () => {
+    const placeholders = addresses.map(() => '?').join(',');
+    const tasksToRelease = db.prepare(
+      `SELECT id, retry_count, max_retries 
+       FROM task_graph 
+       WHERE assigned_to IN (${placeholders}) AND status IN ('assigned', 'running')`
+    ).all(...addresses) as { id: string; retry_count: number; max_retries: number }[];
+
+    for (const task of tasksToRelease) {
+      const nextRetry = (task.retry_count || 0) + 1;
+      const maxRetries = task.max_retries ?? 3;
+      if (nextRetry >= maxRetries) {
+        failTask(db, task.id, "Reassignment cap exceeded after worker deaths", false);
+      } else {
+        db.prepare(
+          `UPDATE task_graph 
+           SET status = 'pending', assigned_to = NULL, started_at = NULL, retry_count = ? 
+           WHERE id = ?`
+        ).run(nextRetry, task.id);
+      }
+      releasedCount++;
+    }
+  });
+  return releasedCount;
+}
+
 export function getReadyTasks(db: Database): TaskNode[] {
   return getReadyTaskRows(db).map(taskRowToTaskNode);
 }

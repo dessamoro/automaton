@@ -78,6 +78,7 @@ function makeOrchestrator(
     inference?: ReturnType<typeof makeInference>;
     config?: any;
     messaging?: ColonyMessaging;
+    isWorkerAlive?: (address: string) => boolean | Promise<boolean>;
   } = {},
 ): Orchestrator {
   const { messaging } = makeMessaging(db);
@@ -89,6 +90,7 @@ function makeOrchestrator(
     inference: overrides.inference ?? (makeInference() as any),
     identity: IDENTITY,
     config: overrides.config ?? {},
+    isWorkerAlive: overrides.isWorkerAlive as any,
   });
 }
 
@@ -200,6 +202,25 @@ describe("orchestration/Orchestrator", () => {
       const orc = makeOrchestrator(db, { inference: inference as any });
       const result = await orc.tick();
       expect(result.phase).toBe("executing");
+    });
+
+    it("recovers stale task when worker is dead (async isWorkerAlive)", async () => {
+      const goalId = insertGoal(db, { status: "active" });
+      const taskId = insertTask(db, {
+        goalId,
+        status: "assigned",
+        assignedTo: "local://dead-worker-1",
+      });
+      setOrchestratorState(db, { phase: "executing", goalId, replanCount: 0, failedTaskId: null, failedError: null });
+
+      const isWorkerAlive = vi.fn().mockResolvedValue(false);
+      const orc = makeOrchestrator(db, { isWorkerAlive });
+
+      await orc.tick();
+
+      expect(isWorkerAlive).toHaveBeenCalledWith("local://dead-worker-1");
+      const taskRow = db.prepare("SELECT status, retry_count FROM task_graph WHERE id = ?").get(taskId) as { status: string; retry_count: number };
+      expect(taskRow.retry_count).toBe(1);
     });
 
     it("classifying with complex goal (>3 steps) transitions to planning", async () => {
@@ -367,6 +388,64 @@ describe("orchestration/Orchestrator", () => {
       expect(result.spawned).toBe(false);
     });
 
+    it("skips bestIdle when isWorkerAlive resolves to false (async)", async () => {
+      const goalId = insertGoal(db);
+      const agentTracker = makeAgentTracker({
+        getIdle: vi.fn().mockReturnValue([]),
+        getBestForTask: vi.fn().mockReturnValue({ address: "0xdeadbest", name: "DeadBest" }),
+      });
+      const isWorkerAlive = vi.fn().mockResolvedValue(false);
+      const orc = makeOrchestrator(db, { agentTracker, isWorkerAlive });
+
+      const result = await orc.matchTaskToAgent(makeTask(goalId));
+      expect(result.agentAddress).not.toBe("0xdeadbest");
+      expect(isWorkerAlive).toHaveBeenCalledWith("0xdeadbest");
+    });
+
+    it("respects isWorkerAlive: filters alive agents when returning true", async () => {
+      const goalId = insertGoal(db);
+      const agentTracker = makeAgentTracker({
+        getIdle: vi.fn().mockReturnValue([{ address: "local://w1", name: "Worker1", role: "generalist", status: "idle" }]),
+      });
+      const orc = makeOrchestrator(db, {
+        agentTracker,
+        isWorkerAlive: vi.fn().mockReturnValue(true),
+      });
+      const result = await orc.matchTaskToAgent(makeTask(goalId));
+      expect(result.agentAddress).toBe("local://w1");
+    });
+
+    it("respects isWorkerAlive: skips dead agent and marks failed after 2 consecutive misses", async () => {
+      const goalId = insertGoal(db);
+      const agentTracker = makeAgentTracker({
+        getIdle: vi.fn().mockReturnValue([{ address: "local://dead-w", name: "DeadWorker", role: "generalist", status: "idle" }]),
+        getBestForTask: vi.fn().mockReturnValue(null),
+      });
+      const isWorkerAlive = vi.fn().mockReturnValue(false);
+      const orc = makeOrchestrator(db, { agentTracker, isWorkerAlive });
+
+      // First call (miss 1): should not mark failed yet
+      await orc.matchTaskToAgent(makeTask(goalId));
+      expect(agentTracker.updateStatus).not.toHaveBeenCalled();
+
+      // Second call (miss 2): marks failed
+      await orc.matchTaskToAgent(makeTask(goalId));
+      expect(agentTracker.updateStatus).toHaveBeenCalledWith("local://dead-w", "failed");
+    });
+
+    it("handles isWorkerAlive rejection gracefully", async () => {
+      const goalId = insertGoal(db);
+      const agentTracker = makeAgentTracker({
+        getIdle: vi.fn().mockReturnValue([{ address: "local://w-err", name: "ErrWorker", role: "generalist", status: "idle" }]),
+        getBestForTask: vi.fn().mockReturnValue(null),
+      });
+      const isWorkerAlive = vi.fn().mockRejectedValue(new Error("Liveness check failed"));
+      const orc = makeOrchestrator(db, { agentTracker, isWorkerAlive });
+
+      const result = await orc.matchTaskToAgent(makeTask(goalId));
+      expect(result.agentAddress).not.toBe("local://w-err");
+    });
+
     it("calls spawnAgent from config when no idle agents", async () => {
       const goalId = insertGoal(db);
       const agentTracker = makeAgentTracker({
@@ -403,6 +482,33 @@ describe("orchestration/Orchestrator", () => {
       const result = await orc.matchTaskToAgent(makeTask(goalId));
       expect(result.agentAddress).toBe("0xbusy");
       expect(result.spawned).toBe(false);
+    });
+
+    it("skips dead busy agents and local workers during busy reassignment", async () => {
+      const goalId = insertGoal(db);
+      // Insert a local worker and a dead remote worker
+      db.prepare(
+        "INSERT INTO children (id, name, address, sandbox_id, genesis_prompt, creator_message, funded_amount_cents, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      ).run(ulid(), "LocalWorker", "local://worker-xyz", "sb-loc", "prompt", "msg", 0, "running", new Date().toISOString());
+      db.prepare(
+        "INSERT INTO children (id, name, address, sandbox_id, genesis_prompt, creator_message, funded_amount_cents, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      ).run(ulid(), "DeadBusy", "0xdeadbusy", "sb-dead", "prompt", "msg", 0, "running", new Date().toISOString());
+
+      const agentTracker = makeAgentTracker({
+        getIdle: vi.fn().mockReturnValue([]),
+        getBestForTask: vi.fn().mockReturnValue(null),
+      });
+      const isWorkerAlive = vi.fn().mockImplementation((addr: string) => addr !== "0xdeadbusy" && !addr.startsWith("local://"));
+      const orc = makeOrchestrator(db, {
+        agentTracker,
+        isWorkerAlive,
+        config: { disableSpawn: true },
+      });
+
+      const result = await orc.matchTaskToAgent(makeTask(goalId));
+      // Should skip both local://worker-xyz and dead 0xdeadbusy, falling back to parent identity
+      expect(result.agentAddress).toBe(IDENTITY.address);
+      expect(agentTracker.updateStatus).toHaveBeenCalledWith("0xdeadbusy", "failed");
     });
 
     it("self-assigns to parent when no child agent is available", async () => {

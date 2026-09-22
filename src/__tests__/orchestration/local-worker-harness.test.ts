@@ -293,7 +293,9 @@ describe("orchestration/LocalWorkerPool harness integration", () => {
     });
 
     const originalHome = process.env.HOME;
+    const originalUserProfile = process.env.USERPROFILE;
     process.env.HOME = tempHome;
+    process.env.USERPROFILE = tempHome;
     try {
       const pool = new LocalWorkerPool({
         db,
@@ -308,6 +310,7 @@ describe("orchestration/LocalWorkerPool harness integration", () => {
       await (pool as any).runWorker("worker-test", task, new AbortController().signal);
     } finally {
       process.env.HOME = originalHome;
+      process.env.USERPROFILE = originalUserProfile;
     }
 
     const row = getTaskById(db, task.id);

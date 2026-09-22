@@ -144,6 +144,58 @@ describe("orchestration/simple-tracker", () => {
     });
   });
 
+  describe("reapLocalWorkers", () => {
+    it("should reap a legacy local://local-worker-x worker", () => {
+      insertChild(db, "c1", "Legacy", "local://local-worker-x", "running");
+      const reaped = tracker.reapLocalWorkers("9999-nonce");
+      expect(reaped).toContain("local://local-worker-x");
+      
+      const child = db.prepare("SELECT status FROM children WHERE address = ?").get("local://local-worker-x") as any;
+      expect(child.status).toBe("failed");
+    });
+
+    it("should keep a current-boot worker alive", () => {
+      const bootId = `${process.pid}-currentnonce`;
+      const address = `local://${bootId}-ulid123`;
+      insertChild(db, "c2", "CurrentBoot", address, "running");
+
+      const reaped = tracker.reapLocalWorkers(bootId);
+      expect(reaped).not.toContain(address);
+
+      const child = db.prepare("SELECT status FROM children WHERE address = ?").get(address) as any;
+      expect(child.status).toBe("running");
+    });
+
+    it("should reap a ghost worker sharing current process PID with different nonce", () => {
+      const bootId = `${process.pid}-currentnonce`;
+      const ghostAddress = `local://${process.pid}-oldnonce-ulid456`;
+      insertChild(db, "c3", "Ghost", ghostAddress, "running");
+
+      const reaped = tracker.reapLocalWorkers(bootId);
+      expect(reaped).toContain(ghostAddress);
+
+      const child = db.prepare("SELECT status FROM children WHERE address = ?").get(ghostAddress) as any;
+      expect(child.status).toBe("failed");
+    });
+
+    it("should leave a worker owned by a live foreign process untouched", async () => {
+      const { spawn } = await import("child_process");
+      const sleeper = spawn(process.execPath, ["-e", "setTimeout(()=>{}, 10000)"], { stdio: "ignore" });
+      try {
+        const address = `local://${sleeper.pid}-foreignnonce-worker-1`;
+        insertChild(db, "c4", "ForeignLive", address, "running");
+        
+        const reaped = tracker.reapLocalWorkers("9999-myboot");
+        expect(reaped).not.toContain(address);
+        
+        const child = db.prepare("SELECT status FROM children WHERE address = ?").get(address) as any;
+        expect(child.status).toBe("running");
+      } finally {
+        sleeper.kill();
+      }
+    });
+  });
+
   describe("updateStatus", () => {
     it("updates the child status in the DB", () => {
       insertChild(db, "c1", "Agent", "0xagent", "running");

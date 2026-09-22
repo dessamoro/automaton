@@ -14,3 +14,4 @@ dist
 
 .worktrees/
 scratch/
+.sandbox/

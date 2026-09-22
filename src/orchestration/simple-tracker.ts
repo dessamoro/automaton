@@ -76,6 +76,57 @@ export class SimpleAgentTracker implements AgentTracker {
       createdAt: new Date().toISOString(),
     });
   }
+
+  reapLocalWorkers(bootId: string): string[] {
+    const candidates = this.db.raw.prepare(
+      `SELECT address FROM children 
+       WHERE address LIKE 'local://%' 
+         AND status IN ('running', 'healthy', 'idle')`
+    ).all() as { address: string }[];
+    
+    const reapedAddresses: string[] = [];
+    const stmt = this.db.raw.prepare(`UPDATE children SET status = 'failed' WHERE address = ?`);
+    
+    for (const row of candidates) {
+      if (!this.isLocalWorkerAlive(row.address, bootId)) {
+        stmt.run(row.address);
+        reapedAddresses.push(row.address);
+      }
+    }
+    
+    return reapedAddresses;
+  }
+
+  isLocalWorkerAlive(address: string, bootId: string): boolean {
+    if (!address.startsWith("local://")) {
+      return false;
+    }
+    if (address.startsWith(`local://${bootId}-`)) {
+      return true; // Current boot's workers are alive
+    }
+
+    const withoutPrefix = address.replace("local://", "");
+    const parts = withoutPrefix.split("-");
+    if (parts.length > 2) {
+      // Format: ${pid}-${nonce}-${ulid}
+      const pidStr = parts[0];
+      const pid = parseInt(pidStr, 10);
+      if (!isNaN(pid) && pid.toString() === pidStr) {
+        if (pid === process.pid) {
+          // Same PID as current process, but different nonce => ghost from prior process
+          return false;
+        }
+        try {
+          process.kill(pid, 0); // Throws if process doesn't exist
+          return true;
+        } catch (e: any) {
+          // EPERM means process exists but we don't own it -> it's alive
+          return e.code === "EPERM";
+        }
+      }
+    }
+    return false;
+  }
 }
 
 export class SimpleFundingProtocol implements FundingProtocol {

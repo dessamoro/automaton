@@ -7,6 +7,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { runAgentLoop } from "../agent/loop.js";
 import { Orchestrator } from "../orchestration/orchestrator.js";
+import { IdleDetector } from "../agent/idle-detector.js";
 import {
   MockInferenceClient,
   MockConwayClient,
@@ -871,5 +872,49 @@ describe("Agent Loop", () => {
 
     expect(inference.calls.length).toBeGreaterThan(0);
     tickSpy.mockRestore();
+  });
+
+  it("idle breaker drives runAgentLoop into sleep_until via repetitive exec ls -la across turns", async () => {
+    // 10 turns of identical exec ls -la
+    const responses = Array.from({ length: 10 }, () =>
+      toolCallResponse([
+        { name: "exec", arguments: { command: "ls -la" } },
+      ]),
+    );
+    const inference = new MockInferenceClient(responses);
+
+    const detector = new IdleDetector({
+      maxUnproductiveTurns: 5,
+      warnAfterTurns: 3,
+      baseBackoffMs: 30000,
+      maxBackoffMs: 300000,
+    });
+
+    const turns: AgentTurn[] = [];
+
+    await runAgentLoop({
+      identity,
+      config,
+      db,
+      conway,
+      inference,
+      idleDetector: detector,
+      onTurnComplete: (turn) => turns.push(turn),
+    });
+
+    // Idle breaker must have stopped the loop at exactly 5 turns, NOT continuing to 10 or 25
+    expect(turns.length).toBe(5);
+    expect(db.getAgentState()).toBe("sleeping");
+
+    const sleepUntil = db.getKV("sleep_until");
+    expect(sleepUntil).toBeDefined();
+    expect(new Date(sleepUntil!).getTime()).toBeGreaterThan(Date.now());
+
+    // Verify that the warning directive reached the model's messages on turn 4 (after 3 unproductive turns)
+    const turn4Messages = inference.calls[3].messages;
+    const warningMsg = turn4Messages.find((m) =>
+      typeof m.content === "string" && m.content.includes("CRITICAL WARNING: Unproductive idle behavior detected"),
+    );
+    expect(warningMsg).toBeDefined();
   });
 });

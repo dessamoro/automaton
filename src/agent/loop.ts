@@ -56,8 +56,10 @@ import { DEFAULT_MEMORY_BUDGET } from "../types.js";
 import { formatMemoryBlock } from "./context.js";
 import { createLogger } from "../observability/logger.js";
 import { Orchestrator } from "../orchestration/orchestrator.js";
+import type { OrchestratorTickResult } from "../orchestration/types.js";
 import { PlanModeController } from "../orchestration/plan-mode.js";
 import { generateTodoMd, injectTodoContext } from "../orchestration/attention.js";
+import { IdleDetector } from "./idle-detector.js";
 import { ColonyMessaging, LocalDBTransport } from "../orchestration/messaging.js";
 import { LocalWorkerPool } from "../orchestration/local-worker.js";
 import { SimpleAgentTracker, SimpleFundingProtocol } from "../orchestration/simple-tracker.js";
@@ -83,6 +85,7 @@ export interface AgentLoopOptions {
   skills?: Skill[];
   policyEngine?: PolicyEngine;
   spendTracker?: SpendTrackerInterface;
+  idleDetector?: IdleDetector;
   onStateChange?: (state: AgentState) => void;
   onTurnComplete?: (turn: AgentTurn) => void;
   ollamaBaseUrl?: string;
@@ -404,11 +407,15 @@ export async function runAgentLoop(
 
   // ─── The Loop ──────────────────────────────────────────────
 
-  const MAX_IDLE_TURNS = 10; // Force sleep after N turns with no real work
-  let idleTurnCount = 0;
-
   const maxCycleTurns = config.maxTurnsPerCycle ?? 25;
   let cycleTurnCount = 0;
+
+  const idleDetector = options.idleDetector || new IdleDetector({
+    maxUnproductiveTurns: 5,
+    warnAfterTurns: 3,
+    baseBackoffMs: 30000,
+    maxBackoffMs: 300000,
+  });
 
   let pendingInput: { content: string; source: string } | undefined = {
     content: wakeupInput,
@@ -596,13 +603,15 @@ export async function runAgentLoop(
         logger.warn(`Signal queue / goals injection skipped: ${err.message}`);
       }
 
+      let orchestratorTick: OrchestratorTickResult | null = null;
+      let selfAssignedTask: { id: string; goal_id?: string; title: string; description: string; agent_role: string; status: string } | undefined;
       if (orchestrator) {
-        const orchestratorTick = await orchestrator.tick();
+        orchestratorTick = await orchestrator.tick();
         db.setKV("orchestrator.last_tick", JSON.stringify(orchestratorTick));
         const localWorkersActive = workerPool?.getActiveCount() ?? 0;
-        const selfAssignedTask = db.raw.prepare(
-          `SELECT id, title, description, agent_role, status FROM task_graph WHERE assigned_to = ? AND status IN ('assigned', 'running') ORDER BY priority DESC LIMIT 1`,
-        ).get(identity.address) as { id: string; title: string; description: string; agent_role: string; status: string } | undefined;
+        selfAssignedTask = db.raw.prepare(
+          `SELECT id, goal_id, title, description, agent_role, status FROM task_graph WHERE assigned_to = ? AND status IN ('assigned', 'running') ORDER BY priority DESC LIMIT 1`,
+        ).get(identity.address) as { id: string; goal_id?: string; title: string; description: string; agent_role: string; status: string } | undefined;
         const hasSelfAssignedParentTask = !!selfAssignedTask;
 
         if (selfAssignedTask) {
@@ -908,37 +917,31 @@ You are the assigned agent for this task. Execute the task steps using your avai
       }
 
       // ── Idle turn detection ──
-      // If this turn had no pending input and didn't do any real work
-      // (no mutations — only read/check/list/info tools), count as idle.
-      // Use a blocklist of mutating tools rather than an allowlist of safe ones.
-      const MUTATING_TOOLS = new Set([
-        "exec", "write_file", "edit_own_file", "transfer_credits", "topup_credits", "fund_child",
-        "spawn_child", "start_child", "delete_sandbox", "create_sandbox",
-        "install_npm_package", "install_mcp_server", "install_skill",
-        "create_skill", "remove_skill", "install_skill_from_git",
-        "install_skill_from_url", "pull_upstream", "git_commit", "git_push",
-        "git_branch", "git_clone", "send_message", "message_child",
-        "register_domain", "register_erc8004", "give_feedback",
-        "update_genesis_prompt", "update_agent_card", "modify_heartbeat",
-        "expose_port", "remove_port", "x402_fetch", "manage_dns",
-        "distress_signal", "prune_dead_children", "sleep",
-        "update_soul", "remember_fact", "set_goal", "complete_goal",
-        "save_procedure", "note_about_agent", "forget",
-        "enter_low_compute", "switch_model", "review_upstream_changes",
-      ]);
-      const didMutate = turn.toolCalls.some((tc) => MUTATING_TOOLS.has(tc.name));
+      const currentTaskId = selfAssignedTask ? selfAssignedTask.id : null;
+      const currentGoalId = selfAssignedTask?.goal_id ?? null;
 
-      if (!currentInput && !didMutate) {
-        idleTurnCount++;
-        if (idleTurnCount >= MAX_IDLE_TURNS) {
-          log(config, `[IDLE] ${idleTurnCount} consecutive idle turns with no work. Entering sleep.`);
-          db.setKV("sleep_until", new Date(Date.now() + 60_000).toISOString());
-          db.setAgentState("sleeping");
-          onStateChange?.("sleeping");
-          running = false;
+      const sleepMs = idleDetector.checkProgress(turn, currentTaskId, currentGoalId);
+
+      const warning = idleDetector.getWarningDirective();
+      if (warning) {
+        if (pendingInput) {
+          pendingInput.content += `\n\n${warning}`;
+        } else {
+          pendingInput = {
+            content: warning,
+            source: "system",
+          };
         }
-      } else {
-        idleTurnCount = 0;
+      }
+
+      if (sleepMs) {
+        const sleepUntil = new Date(Date.now() + sleepMs).toISOString();
+        log(config, `[IDLE] Unproductive turns threshold reached. Backing off until ${sleepUntil}.`);
+        db.setKV("sleep_until", sleepUntil);
+        db.setAgentState("sleeping");
+        onStateChange?.("sleeping");
+        running = false;
+        break;
       }
 
       // ── Cycle turn limit ──

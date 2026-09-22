@@ -3,6 +3,7 @@ export interface AgentTracker {
   getBestForTask(role: string): { address: string; name: string } | null;
   updateStatus(address: string, status: string): void;
   register(agent: { address: string; name: string; role: string; sandboxId: string }): void;
+  reapLocalWorkers?(bootId: string): string[];
 }
 
 export interface FundingProtocol {

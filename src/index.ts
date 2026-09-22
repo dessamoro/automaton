@@ -487,6 +487,7 @@ async function run(): Promise<void> {
     port: x402Port,
     walletAddress: chainIdentity.address,
     network: resolvedChainType === "solana" ? "solana" : "eip155:8453",
+    publicUrl: process.env.PUBLIC_URL,
   });
 
   // Register default paid services
@@ -648,6 +649,43 @@ async function run(): Promise<void> {
   // The automaton alternates between running and sleeping.
   // The heartbeat can wake it up.
 
+  try {
+    const { releaseAssignedTo } = await import("./orchestration/task-graph.js");
+    const { SimpleAgentTracker } = await import("./orchestration/simple-tracker.js");
+    const { BOOT_ID } = await import("./orchestration/boot-id.js");
+    const tracker = new SimpleAgentTracker(db);
+    
+    db.raw.transaction(() => {
+      const reapedAddresses = tracker.reapLocalWorkers(BOOT_ID);
+      
+      const assignedLocalTasks = db.raw.prepare(
+        `SELECT DISTINCT assigned_to FROM task_graph 
+         WHERE status IN ('assigned', 'running') AND assigned_to LIKE 'local://%'`
+      ).all() as { assigned_to: string }[];
+
+      const staleTaskAddresses = assignedLocalTasks
+        .map(t => t.assigned_to)
+        .filter(addr => !tracker.isLocalWorkerAlive(addr, BOOT_ID));
+
+      const addressesToRelease = Array.from(new Set([...reapedAddresses, ...staleTaskAddresses]));
+      const released = releaseAssignedTo(db.raw, addressesToRelease);
+      const reaped = reapedAddresses.length;
+      if (released > 0 || reaped > 0) {
+        logger.info(`[${new Date().toISOString()}] Boot sanitization: released ${released} stale tasks, reaped ${reaped} ghost workers (bootId: ${BOOT_ID})`);
+      }
+    })();
+  } catch (err: any) {
+    logger.warn(`Failed to perform boot sanitization: ${err.message}`);
+  }
+
+  const { IdleDetector } = await import("./agent/idle-detector.js");
+  const idleDetector = new IdleDetector({
+    maxUnproductiveTurns: 5,
+    warnAfterTurns: 3,
+    baseBackoffMs: 30000,
+    maxBackoffMs: 300000,
+  });
+
   while (true) {
     try {
       // Reload skills (may have changed since last loop)
@@ -668,6 +706,7 @@ async function run(): Promise<void> {
         skills,
         policyEngine,
         spendTracker,
+        idleDetector,
         ollamaBaseUrl,
         onStateChange: (state: AgentState) => {
           logger.info(`[${new Date().toISOString()}] State: ${state}`);
