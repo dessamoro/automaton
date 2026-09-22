@@ -5,7 +5,7 @@
  * The database IS the automaton's memory.
  */
 
-export const SCHEMA_VERSION = 12;
+export const SCHEMA_VERSION = 13;
 
 export const CREATE_TABLES = `
   -- Schema version tracking
@@ -284,6 +284,49 @@ export const MIGRATION_V4 = `
   );
 
   CREATE INDEX IF NOT EXISTS idx_dedup_expires ON heartbeat_dedup(expires_at);
+
+  -- Commercial Opportunities (Milestone First Dollar)
+  CREATE TABLE IF NOT EXISTS opportunities (
+    id TEXT PRIMARY KEY,
+    type TEXT NOT NULL,
+    source TEXT NOT NULL,
+    target TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT,
+    estimated_revenue REAL NOT NULL,
+    estimated_cost REAL NOT NULL,
+    estimated_prob REAL NOT NULL,
+    expected_value REAL NOT NULL,
+    estimated_duration_min REAL NOT NULL DEFAULT 15,
+    ev_per_minute REAL NOT NULL,
+    risk_score REAL NOT NULL DEFAULT 0.1,
+    selection_score REAL NOT NULL DEFAULT 0.0,
+    status TEXT NOT NULL,
+    mission_contract TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    completed_at TEXT,
+    actual_revenue REAL DEFAULT 0,
+    actual_cost REAL DEFAULT 0,
+    failure_category TEXT,
+    failure_reason TEXT,
+    predicted_probability REAL,
+    actual_outcome INTEGER
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_opportunities_status ON opportunities(status);
+  CREATE INDEX IF NOT EXISTS idx_opportunities_selection ON opportunities(status, selection_score DESC);
+
+  -- Authoritative Commercial Goals (Milestone FDV-001)
+  CREATE TABLE IF NOT EXISTS commercial_goals (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    target_revenue REAL NOT NULL DEFAULT 1.00,
+    realized_revenue REAL NOT NULL DEFAULT 0.0,
+    status TEXT NOT NULL DEFAULT 'active',
+    started_at TEXT NOT NULL DEFAULT (datetime('now')),
+    completed_at TEXT,
+    settlement_proofs TEXT DEFAULT '[]'
+  );
 
   -- Data migration: heartbeat_entries -> heartbeat_schedule
   INSERT OR IGNORE INTO heartbeat_schedule (task_name, cron_expression, enabled, last_run_at, next_run_at)
@@ -701,4 +744,53 @@ export const MIGRATION_V12 = `
   CREATE INDEX IF NOT EXISTS idx_desires_status ON desires(status);
   CREATE INDEX IF NOT EXISTS idx_desires_category ON desires(category);
 `;
+
+// === Commercial Architecture: Opportunities Table ===
+
+export const MIGRATION_V13 = `
+  -- Schema version: 13
+  -- Tables: opportunities (Commercial Governor & Opportunity Ledger) & commercial_goals (FDV-001)
+
+  CREATE TABLE IF NOT EXISTS opportunities (
+    id TEXT PRIMARY KEY,
+    type TEXT NOT NULL,
+    source TEXT NOT NULL,
+    target TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT,
+    estimated_revenue REAL NOT NULL,
+    estimated_cost REAL NOT NULL,
+    estimated_prob REAL NOT NULL,
+    expected_value REAL NOT NULL,
+    estimated_duration_min REAL NOT NULL DEFAULT 15,
+    ev_per_minute REAL NOT NULL,
+    risk_score REAL NOT NULL DEFAULT 0.1,
+    selection_score REAL NOT NULL DEFAULT 0.0,
+    status TEXT NOT NULL,
+    mission_contract TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    completed_at TEXT,
+    actual_revenue REAL DEFAULT 0,
+    actual_cost REAL DEFAULT 0,
+    failure_category TEXT,
+    failure_reason TEXT,
+    predicted_probability REAL,
+    actual_outcome INTEGER
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_opportunities_status ON opportunities(status);
+  CREATE INDEX IF NOT EXISTS idx_opportunities_selection ON opportunities(status, selection_score DESC);
+
+  CREATE TABLE IF NOT EXISTS commercial_goals (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    target_revenue REAL NOT NULL DEFAULT 1.00,
+    realized_revenue REAL NOT NULL DEFAULT 0.0,
+    status TEXT NOT NULL DEFAULT 'active',
+    started_at TEXT NOT NULL DEFAULT (datetime('now')),
+    completed_at TEXT,
+    settlement_proofs TEXT DEFAULT '[]'
+  );
+`;
+
 

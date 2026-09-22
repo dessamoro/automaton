@@ -69,6 +69,7 @@ import { ProviderRegistry } from "../inference/provider-registry.js";
 import { UnifiedInferenceClient } from "../inference/inference-client.js";
 import { isIdleOnlyTool } from "./idle-only-tools.js";
 import { CompoundingGoalsManager, SignalQueueManager } from "./goals.js";
+import { CommercialGovernor } from "./commercial-governor.js";
 
 const logger = createLogger("loop");
 const MAX_TOOL_CALLS_PER_TURN = 10;
@@ -417,10 +418,63 @@ export async function runAgentLoop(
     maxBackoffMs: 300000,
   });
 
-  let pendingInput: { content: string; source: string } | undefined = {
-    content: wakeupInput,
-    source: "wakeup",
-  };
+  // ─── Commercial Governor Integration ─────────────────────────
+  const commercialGovernor = new CommercialGovernor(db, {
+    maxAllowedRisk: 0.5,
+    defaultTokenSpendCapUsd: 0.50,
+    minRewardUsd: 1.00,
+  });
+
+  let activeMission = commercialGovernor.getActiveMission();
+  if (!activeMission) {
+    activeMission = commercialGovernor.selectBestOpportunity(financial.creditsCents) ?? undefined;
+  }
+
+  // Attempt automatic discovery if ledger has no eligible candidates and credits remain
+  if (!activeMission && financial.creditsCents > 0) {
+    try {
+      const discovered = await commercialGovernor.discoverBounties({ minRewardUsd: 1.00 });
+      if (discovered.length > 0) {
+        activeMission = commercialGovernor.selectBestOpportunity(financial.creditsCents) ?? undefined;
+      }
+    } catch (discErr) {
+      logger.debug("Commercial Governor discovery skipped/failed on wake", { error: String(discErr) });
+    }
+  }
+
+  let pendingInput: { content: string; source: string } | undefined;
+
+  if (activeMission) {
+    const contract = activeMission.missionContract || commercialGovernor.createMissionContract(activeMission);
+    commercialGovernor.startMissionExecution(activeMission.id);
+
+    const missionContractPrompt = `# ACTIVE COMMERCIAL MISSION CONTRACT: ${contract.title}
+- Target: ${contract.target}
+- Estimated Gross Payout: $${contract.economicValue.toFixed(2)}
+- Max Compute Budget: $${contract.maxComputeCost.toFixed(2)}
+- Expected Duration: ${contract.estimatedDurationMin} minutes
+- Objective: ${contract.objective}
+
+## Strict Operational Directives:
+1. Do NOT perform exploratory root directory listings (\`ls -la\`, \`find .\`) or inspect unrelated files.
+2. Focus exclusively on the bounty / mission target: ${contract.target}.
+3. Inspect requirements via \`inspect_bounty\`, clone the repo into \`.sandbox/\` or an isolated directory, solve the issue, run tests to verify.
+4. When verified, submit a pull request via \`submit_bounty_pr\` linking the issue and specifying payout.
+5. Success Conditions:
+${contract.successConditions.map((c) => `   • ${c}`).join("\n")}
+
+Begin execution on this commercial mission immediately.`;
+
+    pendingInput = {
+      content: missionContractPrompt,
+      source: "commercial_governor",
+    };
+  } else {
+    pendingInput = {
+      content: `${wakeupInput}\n\n[COMMERCIAL NOTICE]: No active positive-EV commercial opportunities currently qualified. If no work is pending, please conserve compute and sleep. Do NOT perform repetitive filesystem listings.`,
+      source: "wakeup",
+    };
+  }
 
   while (running) {
     // Declared outside try so the catch block can access for retry/failure handling
@@ -766,6 +820,12 @@ You are the assigned agent for this task. Execute the task steps using your avai
             config,
             `[TOOL RESULT] ${tc.function.name}: ${result.error ? `ERROR: ${result.error}` : result.result.slice(0, 200)}`,
           );
+
+          // If a bounty PR was submitted successfully, transition active mission to submitted (verified execution)
+          if (tc.function.name === "submit_bounty_pr" && !result.error && activeMission) {
+            commercialGovernor.recordExecutionSubmitted(activeMission.id, result.result);
+            log(config, `[COMMERCIAL GOVERNOR] Mission [${activeMission.id}] transitioned to SUBMITTED (verified execution, awaiting settlement)`);
+          }
 
           callCount++;
         }

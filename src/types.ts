@@ -709,6 +709,16 @@ export interface AutomatonDatabase {
   updateDesireStatus?(id: string, status: DesireEntry["status"]): void;
   deleteDesire?(id: string): void;
 
+  // Commercial Opportunities (Milestone First Dollar)
+  recordOpportunity?(opp: Opportunity): void;
+  getOpportunityById?(id: string): Opportunity | undefined;
+  getEligibleOpportunities?(maxCostCents?: number, maxRisk?: number): Opportunity[];
+  updateOpportunityStatus?(id: string, status: OpportunityStatus, updates?: Partial<Opportunity>): void;
+  getActiveOpportunity?(): Opportunity | undefined;
+  listOpportunities?(status?: OpportunityStatus, limit?: number): Opportunity[];
+  getCommercialGoal?(id?: string): CommercialGoal;
+  recordCommercialSettlement?(goalId: string, amountUsd: number, proof: string): CommercialGoal;
+
   close(): void;
 
   // Raw better-sqlite3 instance for direct DB access (Phase 1.1)
@@ -1542,5 +1552,72 @@ export interface DividendDistribution {
   status: "pending" | "distributed" | "skipped";
   reason?: string;
   timestamp: string;
+}
+
+// ─── Commercial Governor & Opportunity Ledger (Milestone First Dollar) ─
+
+export type OpportunityType = "bounty" | "x402_service" | "security_audit";
+export type OpportunitySource = "github" | "algora" | "bountycaster" | "x402" | "base_onchain";
+export type OpportunityStatus =
+  | "discovered"
+  | "qualified"
+  | "selected"
+  | "executing"
+  | "submitted"         // VERIFIED_EXECUTION (PR opened, work delivered)
+  | "verified_reward"   // Platform confirms reward awarded
+  | "verified"          // Backward compatibility alias for submitted/verified
+  | "settled"           // Authoritative payment confirmed in wallet/account
+  | "failed";
+export type FailureCategory = "FAILED_TEST" | "FAILED_AUTH" | "FAILED_TIMEOUT" | "FAILED_INFERENCE" | "FAILED_REJECTED" | "BUDGET_EXCEEDED";
+
+export interface MissionContract {
+  opportunityId: string;
+  title: string;
+  target: string;
+  objective: string;
+  successConditions: string[];
+  maxComputeCost: number; // in USD
+  estimatedDurationMin: number;
+  economicValue: number; // in USD
+  allowedTools: string[];
+  verifierType: "test_suite" | "git_diff" | "github_pr" | "x402_receipt";
+}
+
+export interface Opportunity {
+  id: string;
+  type: OpportunityType;
+  source: OpportunitySource;
+  target: string;
+  title: string;
+  description?: string;
+  estimatedRevenue: number;   // expected gross payout ($)
+  estimatedCost: number;      // expected token & compute cost ($)
+  estimatedProb: number;      // settlement probability [0.0 - 1.0]
+  expectedValue: number;      // (prob * revenue) - cost ($)
+  estimatedDurationMin: number;
+  evPerMinute: number;
+  riskScore: number;          // [0.0 - 1.0]
+  selectionScore: number;     // expectedValue / max(estimatedDurationMin, 1)
+  status: OpportunityStatus;
+  missionContract?: MissionContract;
+  createdAt: string;
+  completedAt?: string;
+  actualRevenue: number;
+  actualCost: number;
+  failureCategory?: FailureCategory;
+  failureReason?: string;
+  predictedProbability?: number; // model confidence calibration
+  actualOutcome?: number;        // 1 (settled) or 0 (failed/rejected)
+}
+
+export interface CommercialGoal {
+  id: string;                    // e.g. 'FDV-001'
+  title: string;
+  targetRevenueUsd: number;      // default $1.00
+  realizedRevenueUsd: number;    // sum of independently verified settlements
+  status: "active" | "achieved" | "abandoned";
+  startedAt: string;
+  completedAt?: string;
+  settlementProofs: string[];    // tx hashes or receipt IDs
 }
 

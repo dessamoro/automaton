@@ -27,6 +27,10 @@ import type {
   ReputationEntry,
   InboxMessage,
   DesireEntry,
+  Opportunity,
+  OpportunityStatus,
+  MissionContract,
+  CommercialGoal,
 } from "../types.js";
 import {
   SCHEMA_VERSION,
@@ -48,6 +52,7 @@ import {
   MIGRATION_V10,
   MIGRATION_V11,
   MIGRATION_V12,
+  MIGRATION_V13,
 } from "./schema.js";
 import type {
   RiskLevel,
@@ -565,6 +570,14 @@ export function createDatabase(dbPath: string): AutomatonDatabase {
     getAllDesires: () => desiresGetAll(db),
     updateDesireStatus: (id: string, s: DesireEntry["status"]) => desireUpdateStatus(db, id, s),
     deleteDesire: (id: string) => desireDelete(db, id),
+    recordOpportunity: (opp: Opportunity) => recordOpportunity(db, opp),
+    getOpportunityById: (id: string) => getOpportunityById(db, id),
+    getEligibleOpportunities: (maxCostCents?: number, maxRisk?: number) => getEligibleOpportunities(db, maxCostCents, maxRisk),
+    updateOpportunityStatus: (id: string, s: OpportunityStatus, u?: Partial<Opportunity>) => updateOpportunityStatus(db, id, s, u),
+    getActiveOpportunity: () => getActiveOpportunity(db),
+    listOpportunities: (s?: OpportunityStatus, limit?: number) => listOpportunities(db, s, limit),
+    getCommercialGoal: (id?: string) => getCommercialGoal(db, id),
+    recordCommercialSettlement: (goalId: string, amountUsd: number, proof: string) => recordCommercialSettlement(db, goalId, amountUsd, proof),
     runTransaction,
     close,
     raw: db,
@@ -636,6 +649,12 @@ function applyMigrations(db: DatabaseType): void {
       version: 12,
       apply: () => {
         try { db.exec(MIGRATION_V12); } catch { /* table may already exist */ }
+      },
+    },
+    {
+      version: 13,
+      apply: () => {
+        try { db.exec(MIGRATION_V13); } catch { /* table may already exist */ }
       },
     },
   ];
@@ -2608,4 +2627,230 @@ function deserializeDesireRow(row: any): DesireEntry {
     updatedAt: row.updated_at,
   };
 }
+
+// ─── Commercial Architecture: Opportunity Ledger Helpers ────────
+
+export function recordOpportunity(db: DatabaseType, opp: Opportunity): void {
+  db.prepare(
+    `INSERT OR REPLACE INTO opportunities (
+      id, type, source, target, title, description,
+      estimated_revenue, estimated_cost, estimated_prob, expected_value,
+      estimated_duration_min, ev_per_minute, risk_score, selection_score,
+      status, mission_contract, created_at, completed_at,
+      actual_revenue, actual_cost, failure_category, failure_reason,
+      predicted_probability, actual_outcome
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    opp.id,
+    opp.type,
+    opp.source,
+    opp.target,
+    opp.title,
+    opp.description ?? null,
+    opp.estimatedRevenue,
+    opp.estimatedCost,
+    opp.estimatedProb,
+    opp.expectedValue,
+    opp.estimatedDurationMin,
+    opp.evPerMinute,
+    opp.riskScore,
+    opp.selectionScore,
+    opp.status,
+    opp.missionContract ? JSON.stringify(opp.missionContract) : null,
+    opp.createdAt || new Date().toISOString(),
+    opp.completedAt ?? null,
+    opp.actualRevenue || 0,
+    opp.actualCost || 0,
+    opp.failureCategory ?? null,
+    opp.failureReason ?? null,
+    opp.predictedProbability ?? opp.estimatedProb,
+    opp.actualOutcome ?? null,
+  );
+}
+
+export function getOpportunityById(db: DatabaseType, id: string): Opportunity | undefined {
+  const row = db.prepare("SELECT * FROM opportunities WHERE id = ?").get(id) as any;
+  return row ? deserializeOpportunityRow(row) : undefined;
+}
+
+export function getEligibleOpportunities(
+  db: DatabaseType,
+  maxCostCents?: number,
+  maxRisk?: number,
+): Opportunity[] {
+  let query = `
+    SELECT * FROM opportunities 
+    WHERE status IN ('discovered', 'qualified')
+      AND expected_value > 0
+  `;
+  const params: any[] = [];
+  if (maxCostCents !== undefined) {
+    query += ` AND (estimated_cost * 100) <= ?`;
+    params.push(maxCostCents);
+  }
+  if (maxRisk !== undefined) {
+    query += ` AND risk_score <= ?`;
+    params.push(maxRisk);
+  }
+  query += ` ORDER BY selection_score DESC, expected_value DESC`;
+  const rows = db.prepare(query).all(...params) as any[];
+  return rows.map(deserializeOpportunityRow);
+}
+
+export function updateOpportunityStatus(
+  db: DatabaseType,
+  id: string,
+  status: OpportunityStatus,
+  updates?: Partial<Opportunity>,
+): void {
+  const fields: string[] = ["status = ?"];
+  const params: any[] = [status];
+
+  if (status === "settled") {
+    fields.push("completed_at = datetime('now')", "actual_outcome = 1");
+  } else if (status === "failed") {
+    fields.push("completed_at = datetime('now')", "actual_outcome = 0");
+  }
+
+  if (updates?.actualRevenue !== undefined) {
+    fields.push("actual_revenue = ?");
+    params.push(updates.actualRevenue);
+  }
+  if (updates?.actualCost !== undefined) {
+    fields.push("actual_cost = ?");
+    params.push(updates.actualCost);
+  }
+  if (updates?.failureCategory !== undefined) {
+    fields.push("failure_category = ?");
+    params.push(updates.failureCategory);
+  }
+  if (updates?.failureReason !== undefined) {
+    fields.push("failure_reason = ?");
+    params.push(updates.failureReason);
+  }
+  if (updates?.missionContract !== undefined) {
+    fields.push("mission_contract = ?");
+    params.push(JSON.stringify(updates.missionContract));
+  }
+  if (updates?.predictedProbability !== undefined) {
+    fields.push("predicted_probability = ?");
+    params.push(updates.predictedProbability);
+  }
+
+  params.push(id);
+  db.prepare(`UPDATE opportunities SET ${fields.join(", ")} WHERE id = ?`).run(...params);
+}
+
+export function getActiveOpportunity(db: DatabaseType): Opportunity | undefined {
+  const row = db.prepare("SELECT * FROM opportunities WHERE status IN ('selected', 'executing', 'submitted', 'verified_reward', 'verified') LIMIT 1").get() as any;
+  return row ? deserializeOpportunityRow(row) : undefined;
+}
+
+export function listOpportunities(
+  db: DatabaseType,
+  status?: OpportunityStatus,
+  limit: number = 50,
+): Opportunity[] {
+  let query = "SELECT * FROM opportunities";
+  const params: any[] = [];
+  if (status) {
+    query += " WHERE status = ?";
+    params.push(status);
+  }
+  query += " ORDER BY created_at DESC LIMIT ?";
+  params.push(limit);
+  const rows = db.prepare(query).all(...params) as any[];
+  return rows.map(deserializeOpportunityRow);
+}
+
+function deserializeOpportunityRow(row: any): Opportunity {
+  let missionContract: MissionContract | undefined;
+  if (row.mission_contract) {
+    try {
+      missionContract = JSON.parse(row.mission_contract);
+    } catch {
+      // ignore parse error
+    }
+  }
+  return {
+    id: row.id,
+    type: row.type,
+    source: row.source,
+    target: row.target,
+    title: row.title,
+    description: row.description ?? undefined,
+    estimatedRevenue: row.estimated_revenue,
+    estimatedCost: row.estimated_cost,
+    estimatedProb: row.estimated_prob,
+    expectedValue: row.expected_value,
+    estimatedDurationMin: row.estimated_duration_min,
+    evPerMinute: row.ev_per_minute,
+    riskScore: row.risk_score,
+    selectionScore: row.selection_score,
+    status: row.status,
+    missionContract,
+    createdAt: row.created_at,
+    completedAt: row.completed_at ?? undefined,
+    actualRevenue: row.actual_revenue || 0,
+    actualCost: row.actual_cost || 0,
+    failureCategory: row.failure_category ?? undefined,
+    failureReason: row.failure_reason ?? undefined,
+    predictedProbability: row.predicted_probability ?? undefined,
+    actualOutcome: row.actual_outcome ?? undefined,
+  };
+}
+
+// ─── Authoritative Commercial Goals Helpers (FDV-001) ──────────
+
+export function getCommercialGoal(db: DatabaseType, id: string = "FDV-001"): CommercialGoal {
+  let row = db.prepare("SELECT * FROM commercial_goals WHERE id = ?").get(id) as any;
+  if (!row) {
+    db.prepare(
+      `INSERT INTO commercial_goals (id, title, target_revenue, realized_revenue, status, started_at, settlement_proofs)
+       VALUES (?, ?, 1.00, 0.0, 'active', datetime('now'), '[]')`
+    ).run(id, "FDV-001 — Autonomous First Dollar");
+    row = db.prepare("SELECT * FROM commercial_goals WHERE id = ?").get(id) as any;
+  }
+  let proofs: string[] = [];
+  try {
+    proofs = JSON.parse(row.settlement_proofs || "[]");
+  } catch {
+    proofs = [];
+  }
+  return {
+    id: row.id,
+    title: row.title,
+    targetRevenueUsd: row.target_revenue,
+    realizedRevenueUsd: row.realized_revenue,
+    status: row.status,
+    startedAt: row.started_at,
+    completedAt: row.completed_at ?? undefined,
+    settlementProofs: proofs,
+  };
+}
+
+export function recordCommercialSettlement(
+  db: DatabaseType,
+  goalId: string = "FDV-001",
+  amountUsd: number,
+  proof: string,
+): CommercialGoal {
+  const goal = getCommercialGoal(db, goalId);
+  const newRevenue = Math.round((goal.realizedRevenueUsd + amountUsd) * 100) / 100;
+  const isAchieved = newRevenue >= goal.targetRevenueUsd;
+  const newProofs = [...goal.settlementProofs, proof];
+
+  const status = isAchieved ? "achieved" : "active";
+  const completedAt = isAchieved ? new Date().toISOString() : null;
+
+  db.prepare(
+    `UPDATE commercial_goals 
+     SET realized_revenue = ?, status = ?, completed_at = COALESCE(?, completed_at), settlement_proofs = ?
+     WHERE id = ?`
+  ).run(newRevenue, status, completedAt, JSON.stringify(newProofs), goalId);
+
+  return getCommercialGoal(db, goalId);
+}
+
+
 
